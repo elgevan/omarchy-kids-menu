@@ -27,7 +27,7 @@ rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.13.2" and
+  .version == "0.13.3" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -332,7 +332,6 @@ rg -q 'special:omarchy-kids-parent' "$WINDOW_SESSION" \
   && rg -q 'originalActiveWorkspace' "$WINDOW_SESSION" \
   && rg -q 'Quickshell\.execDetached\(\[root\.windowSessionTool, "exit"\]\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'function guardAppLaunch' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'parent windows hidden' "$PLUGIN_ROOT/Panel.qml" \
   || fail "Kids Mode does not reversibly hide and guard pre-existing windows"
 
 rg -q 'item\.userMenuPath = root\.pluginRoot \+ "/empty-menu\.jsonc"' "$PLUGIN_ROOT/Menu.qml" \
@@ -348,7 +347,6 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'persist && !root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" \
   && rg -q '!root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'enabled: root\.allowlistEditable' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'Exit Kids Mode to change available apps\.' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'selectionFilter === "selected"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'selectionFilter === "not-selected"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'filterLabel: "NOT SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
@@ -359,7 +357,9 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   || fail "right-side app manager is not mode-gated or wired to the persisted allowlist and quick filters"
 
 if rg -Fq 'Normal Omarchy menu active • notifications restored' "$PLUGIN_ROOT/Panel.qml" \
-  || rg -Fq 'App selections are saved automatically across reboots.' "$PLUGIN_ROOT/Panel.qml"; then
+  || rg -Fq 'App selections are saved automatically across reboots.' "$PLUGIN_ROOT/Panel.qml" \
+  || rg -Fq 'apps available • notifications muted' "$PLUGIN_ROOT/Panel.qml" \
+  || rg -Fq 'Exit Kids Mode to change available apps.' "$PLUGIN_ROOT/Panel.qml"; then
   fail "manager still contains removed redundant status text"
 fi
 
@@ -380,7 +380,6 @@ rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'setDoNotDisturb\(true\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'notifications\.setDoNotDisturb\(root\.notificationRestoreDnd\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'NotificationState\.stateText\(false, false\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'notifications muted' "$PLUGIN_ROOT/Panel.qml" \
   || fail "Kids Mode does not mute notifications and restore the previous DND state"
 
 rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml" \

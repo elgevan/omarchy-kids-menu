@@ -265,8 +265,10 @@ pass "transient shortcut ownership is recorded"
 
 locked_allowlist_hash=$(sha256sum "$ALLOWLIST" | awk '{print $1}')
 omarchy-shell "$MANAGER_ID" show
-wait_until "active manager explains that app selection is read-only" 15 \
-  screen_contains "Exit Kids Mode to change available apps"
+wait_until "active manager omits the redundant availability summary" 15 \
+  screen_lacks "apps available"
+wait_until "active manager omits the redundant edit hint" 15 \
+  screen_lacks "Exit Kids Mode to change available apps"
 wtype -k Return
 sleep 1
 allowlist_hash_is "$locked_allowlist_hash" \
