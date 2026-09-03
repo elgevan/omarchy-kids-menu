@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.elgevan.omarchy-kids",
   "name": "Omarchy Kids Menu",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "author": "Omarchy Kids",
   "license": "MIT",
   "description": "A switchable Kids Mode with authenticated exit, an app allowlist, reversible shortcut filtering, muted notifications, isolated browser launches, and window hiding.",

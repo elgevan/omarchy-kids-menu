@@ -54,6 +54,7 @@ Item {
   readonly property bool notificationsMuted: root.notificationApplied
     && root.notificationService
     && root.notificationService.doNotDisturb === true
+  readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
     : "io.github.elgevan.omarchy-kids"
@@ -80,6 +81,7 @@ Item {
   }
 
   function replaceAllowedIds(values, persist) {
+    if (persist && !root.allowlistEditable) return false
     var normalized = Allowlist.normalizeIds(values)
     var changed = !root.sameIds(root.allowedDesktopIds, normalized)
     root.allowedDesktopIds = normalized
@@ -88,6 +90,7 @@ Item {
       root.scheduleShortcutPolicySync()
     }
     if (persist) root.persist()
+    return changed
   }
 
   function load(rawText) {
@@ -103,24 +106,27 @@ Item {
   }
 
   function setAllowed(desktopId, allowed) {
+    if (!root.allowlistEditable) return false
     var id = Allowlist.normalizeDesktopId(desktopId)
-    if (!id) return
+    if (!id) return false
 
     var next = root.allowedDesktopIds.slice()
     var index = next.indexOf(id)
     if (allowed && index < 0) next.push(id)
     else if (!allowed && index >= 0) next.splice(index, 1)
-    else return
+    else return false
 
-    root.replaceAllowedIds(next, true)
+    return root.replaceAllowedIds(next, true)
   }
 
   function toggleAllowed(desktopId) {
-    root.setAllowed(desktopId, !root.isAllowed(desktopId))
+    if (!root.allowlistEditable) return false
+    return root.setAllowed(desktopId, !root.isAllowed(desktopId))
   }
 
   function resetDefaults() {
-    root.replaceAllowedIds(root.defaultDesktopIds, true)
+    if (!root.allowlistEditable) return false
+    return root.replaceAllowedIds(root.defaultDesktopIds, true)
   }
 
   function persist() {

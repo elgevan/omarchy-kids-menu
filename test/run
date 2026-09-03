@@ -23,7 +23,7 @@ fail() {
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.12.0" and
+  .version == "0.13.0" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -340,6 +340,11 @@ rg -q 'function remove\(' "$PLUGIN_ROOT/Menu.qml" \
 
 rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'toggleAllowed' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'readonly property bool allowlistEditable: root\.modeStateLoaded && !root\.kidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'persist && !root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q '!root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'enabled: root\.allowlistEditable' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'Exit Kids Mode to change available apps\.' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'selectionFilter === "selected"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'selectionFilter === "not-selected"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'filterLabel: "NOT SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
@@ -347,7 +352,7 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'managerWidgetId: pluginId \+ "\.manager"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ShellIntegration\.activate' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
-  || fail "right-side app manager is not wired to the persisted allowlist and quick filters"
+  || fail "right-side app manager is not mode-gated or wired to the persisted allowlist and quick filters"
 
 rg -q 'setStockMenuDisabled\(config, kidsModeEnabled === true\)' "$PLUGIN_ROOT/ShellIntegration.js" \
   && rg -q 'ShellIntegration\.deactivate' "$PLUGIN_ROOT/Service.qml" \

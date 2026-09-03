@@ -16,7 +16,7 @@ The normal Omarchy symbol stays in its usual place on the left and opens whichev
 
 Starting Kids Mode also records every existing Hyprland application window, silently moves those windows to a hidden parent workspace, and opens a clean named Kids workspace. The applications keep running, so unsaved work is not discarded. After authenticated exit, surviving windows return to their original workspaces and the previously focused window is focused again. Pinned windows are temporarily unpinned and regain their pinned state on exit. A best-effort launch guard keeps a pre-existing single-instance app hidden if starting it from the Kids menu would otherwise reveal the parent's existing window.
 
-Any installed desktop app can be added to or removed from the allowlist. Use the **All**, **Selected**, and **Not Selected** quick filters to review the current allowlist or find apps that can still be added. Their keyboard shortcuts are `Ctrl+1`, `Ctrl+2`, and `Ctrl+3`; `Ctrl+Shift+K` activates the mode switch. The selection and mode are saved to:
+When Kids Mode is inactive, any installed desktop app can be added to or removed from the allowlist. While Kids Mode is active, the app list and reset control are read-only; exit Kids Mode with password or fingerprint authentication before changing the selection. The **All**, **Selected**, and **Not Selected** quick filters remain available in either mode for reviewing the current allowlist. Their keyboard shortcuts are `Ctrl+1`, `Ctrl+2`, and `Ctrl+3`; `Ctrl+Shift+K` activates the mode switch. The selection and mode are saved to:
 
 ```text
 ~/.config/omarchy-kids/allowed-apps.json

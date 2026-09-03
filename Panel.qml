@@ -23,6 +23,8 @@ Panel {
   readonly property var lockService: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? bar.shell.serviceFor("omarchy.lock")
     : null
+  readonly property bool allowlistEditable: root.service
+    && root.service.allowlistEditable === true
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -100,7 +102,8 @@ Panel {
   }
 
   function toggleCurrent() {
-    if (!root.service || appList.currentIndex < 0 || appList.currentIndex >= appModel.count) return
+    if (!root.allowlistEditable || !root.service
+        || appList.currentIndex < 0 || appList.currentIndex >= appModel.count) return
     root.service.toggleAllowed(appModel.get(appList.currentIndex).appId)
   }
 
@@ -539,8 +542,8 @@ Panel {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(14)
               anchors.verticalCenter: parent.verticalCenter
-              text: appRow.appAllowed ? "✓" : "+"
-              color: appRow.appAllowed ? root.accent : root.dim
+              text: appRow.appAllowed ? "✓" : root.allowlistEditable ? "+" : "—"
+              color: appRow.appAllowed && root.allowlistEditable ? root.accent : root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.heading
               font.bold: true
@@ -549,8 +552,9 @@ Panel {
             MouseArea {
               id: rowMouse
               anchors.fill: parent
+              enabled: root.allowlistEditable
               hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
+              cursorShape: root.allowlistEditable ? Qt.PointingHandCursor : Qt.ArrowCursor
               onClicked: {
                 appList.currentIndex = appRow.index
                 if (root.service) root.service.toggleAllowed(appRow.appId)
@@ -567,7 +571,9 @@ Panel {
         Text {
           width: parent.width - resetButton.width - parent.spacing
           anchors.verticalCenter: parent.verticalCenter
-          text: "App selections are saved automatically across reboots."
+          text: root.allowlistEditable
+            ? "App selections are saved automatically across reboots."
+            : "Exit Kids Mode to change available apps."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -579,7 +585,8 @@ Panel {
           implicitWidth: resetLabel.implicitWidth + Style.space(20)
           implicitHeight: resetLabel.implicitHeight + Style.space(10)
           radius: height / 2
-          color: resetMouse.containsMouse
+          opacity: root.allowlistEditable ? 1 : 0.45
+          color: resetMouse.containsMouse && root.allowlistEditable
             ? Style.hoverFillFor(root.accent, root.accent)
             : Style.normalFillFor(root.foreground, root.accent)
           borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
@@ -597,8 +604,9 @@ Panel {
           MouseArea {
             id: resetMouse
             anchors.fill: parent
+            enabled: root.allowlistEditable
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: root.allowlistEditable ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: if (root.service) root.service.resetDefaults()
           }
         }
