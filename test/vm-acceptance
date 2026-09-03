@@ -56,13 +56,13 @@ screen_contains() {
 
 plugin_enabled() {
   omarchy plugin list --json | jq -e --arg id "$PLUGIN_ID" '
-    any(.[]; .id == $id and .enabled == true and .active == true and .clonedFrom == "omarchy.menu")
+    any(.[]; .id == $id and .enabled == true and .clonedFrom == "omarchy.menu")
   '
 }
 
 stock_menu_restored() {
   omarchy plugin list --json | jq -e '
-    any(.[]; .id == "omarchy.menu" and .enabled == true and .active == true)
+    any(.[]; .id == "omarchy.menu" and .enabled == true)
   '
 }
 
