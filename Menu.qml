@@ -18,6 +18,9 @@ Loader {
   readonly property var allowlistService: shell && typeof shell.serviceFor === "function"
     ? shell.serviceFor("omarchy-kids.menu")
     : null
+  readonly property bool kidsModeEnabled: root.allowlistService
+    ? root.allowlistService.kidsModeEnabled !== false
+    : true
 
   readonly property string pluginRoot: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir)
@@ -82,10 +85,12 @@ Loader {
   Connections {
     target: root.allowlistService
     function onAllowlistChanged() { filteredAppLibrary.appsChanged() }
+    function onKidsModeChanged() { root.configureMenu() }
   }
 
   function normalizedPayload(payloadJson) {
     var raw = payloadJson || "{}"
+    if (!root.kidsModeEnabled) return raw
     try {
       var payload = JSON.parse(raw)
       if (payload && payload.mode !== "select" && payload.mode !== "input") {
@@ -105,14 +110,18 @@ Loader {
     if (!item) return
 
     item.omarchyPath = root.omarchyPath
-    item.shell = filteredShell
+    item.shell = root.kidsModeEnabled ? filteredShell : root.shell
     item.manifest = root.manifest
 
-    if (root.pluginRoot) {
+    if (root.kidsModeEnabled && root.pluginRoot) {
       item.defaultMenuPath = root.pluginRoot + "/kids-menu.jsonc"
       // App additions are handled by the DesktopEntries allowlist service,
       // not by arbitrary menu actions from Omarchy's normal user extension.
       item.userMenuPath = root.pluginRoot + "/empty-menu.jsonc"
+      item.refresh()
+    } else if (root.omarchyPath) {
+      item.defaultMenuPath = root.omarchyPath + "/default/omarchy/omarchy-menu.jsonc"
+      item.userMenuPath = Quickshell.env("HOME") + "/.config/omarchy/extensions/omarchy-menu.jsonc"
       item.refresh()
     }
 

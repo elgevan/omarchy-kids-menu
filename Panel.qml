@@ -14,9 +14,15 @@ Panel {
   property string selectionFilter: "all"
   property int installedAppCount: 0
   property int installedAllowedCount: 0
+  property bool awaitingUnlock: false
+  property bool lockObserved: false
+  property string authError: ""
 
   readonly property var barIdentity: hostWidget || root
   readonly property var appLibrary: bar && bar.shell ? bar.shell.appLibrary : null
+  readonly property var lockService: bar && bar.shell && typeof bar.shell.serviceFor === "function"
+    ? bar.shell.serviceFor("omarchy.lock")
+    : null
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -98,6 +104,43 @@ Panel {
     root.service.toggleAllowed(appModel.get(appList.currentIndex).appId)
   }
 
+  function toggleKidsMode() {
+    if (!root.service || !root.service.modeStateLoaded) return
+    root.authError = ""
+
+    if (!root.service.kidsModeEnabled) {
+      root.service.setKidsModeEnabled(true)
+      return
+    }
+
+    if (!root.lockService || typeof root.lockService.beginLock !== "function") {
+      root.authError = "Authentication is unavailable"
+      return
+    }
+
+    root.awaitingUnlock = true
+    root.lockObserved = false
+    if (!root.lockService.beginLock()) {
+      root.awaitingUnlock = false
+      root.authError = "Could not start authentication"
+      return
+    }
+
+    root.lockObserved = root.lockService.locked === true
+    root.close()
+  }
+
+  function handleLockState() {
+    if (!root.awaitingUnlock || !root.lockService) return
+    if (root.lockService.locked) {
+      root.lockObserved = true
+    } else if (root.lockObserved) {
+      root.awaitingUnlock = false
+      root.lockObserved = false
+      if (root.service) root.service.setKidsModeEnabled(false)
+    }
+  }
+
   ListModel { id: appModel }
 
   Connections {
@@ -108,6 +151,11 @@ Panel {
   Connections {
     target: root.service
     function onAllowlistChanged() { root.rebuildApps() }
+  }
+
+  Connections {
+    target: root.lockService
+    function onLockedChanged() { root.handleLockState() }
   }
 
   KeyboardPanel {
@@ -130,12 +178,12 @@ Panel {
         spacing: Style.space(10)
 
         Column {
-          width: parent.width - enabledPill.width - parent.spacing
+          width: parent.width - modeToggle.width - parent.spacing
           spacing: Style.space(2)
 
           Text {
             width: parent.width
-            text: "KIDS MENU APPS"
+            text: "KIDS MODE"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
@@ -145,9 +193,11 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.notificationsMuted
-              ? "Choose apps • notifications muted"
-              : "Choose which installed apps appear"
+            text: root.authError.length > 0
+              ? root.authError
+              : root.service && root.service.kidsModeEnabled
+                ? root.installedAllowedCount + " apps shown • notifications muted"
+                : root.installedAllowedCount + " apps ready • normal menu active"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -155,22 +205,38 @@ Panel {
         }
 
         BorderSurface {
-          id: enabledPill
+          id: modeToggle
           anchors.verticalCenter: parent.verticalCenter
-          implicitWidth: enabledText.implicitWidth + Style.space(14)
-          implicitHeight: enabledText.implicitHeight + Style.space(7)
+          implicitWidth: modeToggleText.implicitWidth + Style.space(20)
+          implicitHeight: modeToggleText.implicitHeight + Style.space(11)
           radius: height / 2
-          color: Style.selectedFillFor(root.accent, root.accent)
-          borderSpec: Border.controlSpec("selected", root.accent, root.accent)
+          color: root.service && root.service.kidsModeEnabled
+            ? Style.selectedFillFor(root.accent, root.accent)
+            : modeToggleMouse.containsMouse
+              ? Style.hoverFillFor(root.accent, root.accent)
+              : Style.normalFillFor(root.foreground, root.accent)
+          borderSpec: Border.controlSpec(
+            root.service && root.service.kidsModeEnabled ? "selected" : "normal",
+            root.service && root.service.kidsModeEnabled ? root.accent : root.foreground,
+            root.accent
+          )
 
           Text {
-            id: enabledText
+            id: modeToggleText
             anchors.centerIn: parent
-            text: root.installedAllowedCount + " SHOWN"
-            color: root.accent
+            text: root.service && root.service.kidsModeEnabled ? "ON" : "OFF"
+            color: root.service && root.service.kidsModeEnabled ? root.accent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
+          }
+
+          MouseArea {
+            id: modeToggleMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleKidsMode()
           }
         }
       }
@@ -210,7 +276,11 @@ Panel {
             root.rebuildApps()
           }
           Keys.onPressed: function(event) {
-            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_1) {
+            if ((event.modifiers & Qt.ControlModifier)
+                && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_K) {
+              root.toggleKidsMode()
+              event.accepted = true
+            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_1) {
               root.setSelectionFilter("all")
               event.accepted = true
             } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_2) {
@@ -421,7 +491,9 @@ Panel {
         Text {
           width: parent.width - resetButton.width - parent.spacing
           anchors.verticalCenter: parent.verticalCenter
-          text: "Only this menu changes; installed apps stay untouched."
+          text: root.service && root.service.kidsModeEnabled
+            ? "Password or fingerprint is required to turn Kids Mode off."
+            : "Turn Kids Mode on to apply this app filter."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

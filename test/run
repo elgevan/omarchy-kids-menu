@@ -72,6 +72,17 @@ assert.deepEqual(
 )
 NODE
 
+node - "$PLUGIN_ROOT/ModeState.js" <<'NODE'
+const assert = require("node:assert/strict")
+const state = require(process.argv[2])
+
+assert.equal(state.parseEnabled(""), true)
+assert.equal(state.parseEnabled("not json"), true)
+assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: false})), false)
+assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
+assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
+NODE
+
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
@@ -96,11 +107,27 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   || fail "right-side app manager is not wired to the persisted allowlist and quick filters"
 
 rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.kidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'setDoNotDisturb\(true\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'notifications\.setDoNotDisturb\(root\.notificationRestoreDnd\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'NotificationState\.stateText\(false, false\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'notifications muted' "$PLUGIN_ROOT/Panel.qml" \
   || fail "Kids Mode does not mute notifications and restore the previous DND state"
+
+rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'function setKidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.kidsModeEnabled \? filteredShell : root\.shell' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q '/default/omarchy/omarchy-menu\.jsonc' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'serviceFor\("omarchy\.lock"\)' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'root\.lockService\.beginLock\(\)' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'setKidsModeEnabled\(false\)' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'text: root\.service && root\.service\.kidsModeEnabled \? "ON" : "OFF"' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "the persistent Kids Mode toggle is not protected by Omarchy authentication"
+
+if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' \
+  "$PLUGIN_ROOT/Panel.qml" "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
+  fail "the plugin handles credentials directly or invokes a privileged helper"
+fi
 
 rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \

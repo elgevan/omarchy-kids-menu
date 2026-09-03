@@ -12,6 +12,9 @@ BarWidget {
     ? bar.shell.serviceFor("omarchy-kids.menu")
     : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property bool kidsModeEnabled: allowlistService
+    ? allowlistService.kidsModeEnabled !== false
+    : true
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false
@@ -57,8 +60,8 @@ BarWidget {
     text: ""
     slotSize: Style.bar.statusSlot
     opticalSize: Style.bar.iconCanvas
-    tooltipText: "Manage Kids Menu apps"
-    active: root.opened
+    tooltipText: root.kidsModeEnabled ? "Kids Mode: On" : "Kids Mode: Off"
+    active: root.opened || root.kidsModeEnabled
     onPressed: root.togglePanel()
   }
 }

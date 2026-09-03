@@ -9,6 +9,7 @@ PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PLUGIN_ID=omarchy-kids.menu
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
+MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
 NOTIFICATION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/notifications.json"
 MANAGER_ID=omarchy-kids.manager
 
@@ -108,13 +109,29 @@ dnd_is() {
   [[ $(omarchy-shell notifications isDnd 2>/dev/null) == "$1" ]]
 }
 
+mode_is() {
+  local current=on
+  if [[ -f $MODE_STATE ]] && ! jq -e '.version == 1 and .enabled == true' "$MODE_STATE" >/dev/null 2>&1; then
+    current=off
+  fi
+  [[ $current == "$1" ]]
+}
+
+lock_is() {
+  [[ $(omarchy-shell lock isLocked 2>/dev/null) == "$1" ]]
+}
+
 cleanup() {
   omarchy-shell shell hide omarchy.menu >/dev/null 2>&1 || true
   if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' >/dev/null; then
     omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
     omarchy plugin remove "$PLUGIN_ID" --yes >/dev/null 2>&1 || true
   fi
-  rm -f -- "$ALLOWLIST" "$NOTIFICATION_STATE"
+  if lock_is true && [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
+    wtype "$OMARCHY_KIDS_TEST_PASSWORD" -s 750 -k Return >/dev/null 2>&1 || true
+    sleep 2
+  fi
+  rm -f -- "$ALLOWLIST" "$MODE_STATE" "$NOTIFICATION_STATE"
 }
 trap cleanup EXIT
 
@@ -126,6 +143,7 @@ omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
 wait_until "kids plugin becomes the active Omarchy menu" 20 plugin_enabled
 wait_until "normal Omarchy menu symbol remains on the left" 20 menu_symbol_on_left
 wait_until "separate Kids manager appears on the right" 20 manager_on_right
+wait_until "Kids Mode defaults to on" 20 mode_is on
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 [[ $(omarchy menu ping) == ok ]] || fail "kids menu answers stock menu IPC"
 pass "kids menu answers stock menu IPC"
@@ -192,6 +210,49 @@ if rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)|xdg-terminal-exe
   fail "installed plugin contains an app/package mutation or terminal shortcut"
 fi
 pass "installed app handling remains filter-only"
+
+if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
+  omarchy-shell "$MANAGER_ID" show
+  wait_until "Kids Mode manager opens" 15 screen_contains "KIDS MODE"
+  wtype -M ctrl -M shift -k k -m shift -m ctrl
+  wait_until "turning Kids Mode off opens authentication" 15 lock_is true
+  wait_until "mode stays on before authentication" 15 mode_is on
+
+  fingerprint=$(omarchy-shell lock status | jq -r '.fingerprint')
+  if [[ $fingerprint != true ]]; then
+    wtype __omarchy_kids_invalid_password__ -s 750 -k Return
+    sleep 2
+    lock_is true || fail "wrong password keeps the session locked"
+    mode_is on || fail "wrong password keeps Kids Mode on"
+    pass "wrong password keeps Kids Mode on"
+  fi
+
+  wtype "$OMARCHY_KIDS_TEST_PASSWORD" -s 750 -k Return
+  wait_until "valid authentication unlocks the session" 20 lock_is false
+  wait_until "valid authentication turns Kids Mode off" 20 mode_is off
+  wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
+  manager_on_right || fail "Kids Mode manager remains available while off"
+  pass "Kids Mode manager remains available while off"
+
+  omarchy menu summon root >/dev/null
+  wait_until "internal Off opens the normal menu" 15 layer_present
+  wait_until "normal menu shows Learn" 15 screen_contains Learn
+  wait_until "normal menu shows Setup" 15 screen_contains Setup
+  screenshot success-internal-mode-off
+  wtype -k Escape
+  wait_until "normal menu closes after internal Off test" 15 layer_absent
+
+  omarchy-shell "$MANAGER_ID" show
+  wait_until "Kids Mode manager reopens while off" 15 screen_contains "KIDS MODE"
+  wtype -M ctrl -M shift -k k -m shift -m ctrl
+  wait_until "turning Kids Mode on is immediate" 15 mode_is on
+  wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
+  lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
+  pass "turning Kids Mode on does not request authentication"
+  omarchy-shell "$MANAGER_ID" hide
+else
+  pass "authenticated in-app toggle test skipped (set OMARCHY_KIDS_TEST_PASSWORD in a disposable VM)"
+fi
 
 packages_after=$(pacman -Qq | sort)
 [[ $packages_before == "$packages_after" ]] || fail "plugin changed the installed package set"

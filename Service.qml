@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "Allowlist.js" as Allowlist
+import "ModeState.js" as ModeState
 import "NotificationState.js" as NotificationState
 
 // Shared state for the menu and its bar-panel editor. The service reads
@@ -17,6 +18,9 @@ Item {
   property var allowedDesktopIds: Allowlist.defaultIds()
   property bool directoryReady: false
   property bool writePending: false
+  property bool kidsModeEnabled: true
+  property bool modeStateLoaded: false
+  property bool modeWritePending: false
   property bool notificationStateLoaded: false
   property bool notificationStateManaged: false
   property bool notificationRestoreDnd: false
@@ -26,6 +30,7 @@ Item {
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
   readonly property string configPath: configDir + "/allowed-apps.json"
+  readonly property string modePath: configDir + "/mode.json"
   readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
   readonly property string stateDir: stateRoot + "/omarchy-kids"
   readonly property string notificationStatePath: stateDir + "/notifications.json"
@@ -42,6 +47,7 @@ Item {
     : ""
 
   signal allowlistChanged()
+  signal kidsModeChanged()
 
   function sameIds(left, right) {
     var a = Allowlist.normalizeIds(left)
@@ -107,6 +113,39 @@ Item {
     settingsFile.setText(Allowlist.settingsText(root.allowedDesktopIds))
   }
 
+  function loadModeState(rawText) {
+    var enabled = ModeState.parseEnabled(rawText)
+    var changed = root.kidsModeEnabled !== enabled
+    root.kidsModeEnabled = enabled
+    root.modeStateLoaded = true
+    if (changed) root.kidsModeChanged()
+    root.scheduleNotificationSetup()
+  }
+
+  function setKidsModeEnabled(enabled) {
+    var next = enabled !== false
+    if (!root.modeStateLoaded || root.kidsModeEnabled === next) return
+    root.kidsModeEnabled = next
+    root.kidsModeChanged()
+    root.persistModeState()
+    root.scheduleNotificationSetup()
+  }
+
+  function persistModeState() {
+    root.modeWritePending = true
+    if (root.directoryReady) {
+      root.flushModeWrite()
+    } else if (!ensureDirectory.running) {
+      ensureDirectory.running = true
+    }
+  }
+
+  function flushModeWrite() {
+    if (!root.modeWritePending) return
+    root.modeWritePending = false
+    modeStateFile.setText(ModeState.stateText(root.kidsModeEnabled))
+  }
+
   function loadNotificationState(rawText) {
     var state = NotificationState.parseState(rawText)
     root.notificationStateManaged = state.managed
@@ -117,7 +156,7 @@ Item {
 
   function applyNotificationPolicy() {
     var notifications = root.notificationService
-    if (!root.directoryReady || !root.notificationStateLoaded || !notifications
+    if (!root.kidsModeEnabled || !root.directoryReady || !root.notificationStateLoaded || !notifications
         || notifications.settingsLoaded !== true)
       return false
 
@@ -140,11 +179,14 @@ Item {
   }
 
   function releaseNotificationPolicy() {
-    if (!root.notificationStateLoaded || !root.notificationStateManaged) return
+    if (!root.notificationStateLoaded || !root.notificationStateManaged) {
+      root.notificationApplied = false
+      return true
+    }
     var notifications = root.notificationService
     if (!notifications || notifications.settingsLoaded !== true) {
       console.warn("omarchy-kids: could not restore notification state")
-      return
+      return false
     }
 
     // Clear our ownership marker first. A future enable will then capture the
@@ -153,6 +195,15 @@ Item {
     root.notificationStateManaged = false
     root.notificationApplied = false
     notifications.setDoNotDisturb(root.notificationRestoreDnd)
+    return true
+  }
+
+  function syncModeEffects() {
+    if (!root.modeStateLoaded || !root.notificationStateLoaded || !root.directoryReady)
+      return false
+    return root.kidsModeEnabled
+      ? root.applyNotificationPolicy()
+      : root.releaseNotificationPolicy()
   }
 
   function managerEntryMatches(entry) {
@@ -237,6 +288,17 @@ Item {
   }
 
   FileView {
+    id: modeStateFile
+    path: root.modePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadModeState(text())
+    onLoadFailed: root.loadModeState("")
+    onFileChanged: reload()
+  }
+
+  FileView {
     id: notificationStateFile
     path: root.notificationStatePath
     watchChanges: true
@@ -254,6 +316,7 @@ Item {
       root.directoryReady = exitCode === 0
       if (root.directoryReady) {
         root.flushWrite()
+        root.flushModeWrite()
         root.scheduleNotificationSetup()
       }
     }
@@ -265,7 +328,7 @@ Item {
     repeat: true
     onTriggered: {
       root.notificationSetupAttempts++
-      if (root.applyNotificationPolicy()) {
+      if (root.syncModeEffects()) {
         stop()
       } else if (root.notificationSetupAttempts >= 100) {
         console.warn("omarchy-kids: notification service was not ready")
