@@ -9,7 +9,9 @@ EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
 WINDOW_SESSION="$PLUGIN_ROOT/window-session"
 SHORTCUT_POLICY="$PLUGIN_ROOT/shortcut-policy"
 
-bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" "$WINDOW_SESSION" "$SHORTCUT_POLICY"
+bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
+  "$PLUGIN_ROOT/test/hyprctl-mock" "$PLUGIN_ROOT/test/keybindings-mock" \
+  "$WINDOW_SESSION" "$SHORTCUT_POLICY"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -21,7 +23,7 @@ fail() {
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.11.0" and
+  .version == "0.12.0" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -232,11 +234,15 @@ shortcut_test_dir=$(mktemp -d)
 shortcut_log=$shortcut_test_dir/hyprctl.log
 shortcut_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.json
 shortcut_mock=$PLUGIN_ROOT/test/hyprctl-mock
+keybindings_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.txt
+keybindings_mock=$PLUGIN_ROOT/test/keybindings-mock
 
 shortcut_result=$(
   XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_RENDERED_BINDS="$keybindings_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
     "$SHORTCUT_POLICY" enter true true true
 )
@@ -250,16 +256,27 @@ rg -Fq 'hl.unbind("SUPER + SPACE")' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
   && rg -Fq 'hl.unbind("SUPER + RETURN")' "$shortcut_log" \
   && rg -Fq 'hl.unbind("SUPER + CTRL + C")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + CTRL + code:10")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + CTRL + code:17")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("CTRL + ALT + DELETE")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + CTRL + DELETE")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + SLASH")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("XF86TouchpadToggle")' "$shortcut_log" \
   || fail "shortcut policy does not redirect menus/browser and block stock bypasses"
 if rg -Fq 'hl.unbind("SUPER + SHIFT + F")' "$shortcut_log"; then
   fail "shortcut policy replaces a customized binding"
+fi
+if rg -Fq 'hl.unbind("SUPER + CTRL + code:18")' "$shortcut_log"; then
+  fail "shortcut policy replaces a customized physical-key binding"
 fi
 
 : > "$shortcut_log"
 shortcut_result=$(
   XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_RENDERED_BINDS="$keybindings_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
     "$SHORTCUT_POLICY" enter false false false
 )

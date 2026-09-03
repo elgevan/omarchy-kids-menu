@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 PLUGIN_ID=io.github.elgevan.omarchy-kids
 HYPRCTL_BIN=${OMARCHY_KIDS_HYPRCTL:-hyprctl}
+KEYBINDINGS_BIN=${OMARCHY_KIDS_KEYBINDINGS:-omarchy-menu-keybindings}
 RUNTIME_ROOT=${XDG_RUNTIME_DIR:-/tmp/omarchy-kids-runtime-$UID}
 STATE_DIR=$RUNTIME_ROOT/omarchy-kids
 ACTIVE_MARKER=$STATE_DIR/shortcut-policy.active
@@ -105,6 +106,13 @@ if ! jq -e 'type == "array"' <<<"$bindings_json" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Hyprland 0.56 reports Lua code: bindings with keycode 0. Omarchy's own
+# keybinding renderer reconstructs those keys from the loaded Lua config.
+rendered_bindings=""
+if command -v "$KEYBINDINGS_BIN" >/dev/null 2>&1; then
+  rendered_bindings=$($KEYBINDINGS_BIN --print 2>/dev/null || true)
+fi
+
 lua_program=""
 changed=0
 skipped=0
@@ -127,6 +135,53 @@ binding_is_unmodified_stock() {
       | ($matches | length) == 1
         and $matches[0].description == $description
     ' <<<"$bindings_json" >/dev/null
+}
+
+binding_code_is_unmodified_stock() {
+  local modmask=$1 keycode=$2 rendered_keys=$3 description=$4
+
+  if jq -e \
+    --argjson modmask "$modmask" \
+    --argjson keycode "$keycode" '
+      [.[]
+        | select(.modmask == $modmask)
+        | select((.key // "") == "")
+        | select((.keycode // -1) == $keycode)
+        | select((.submap // "") == "")
+      ] | length > 0
+    ' <<<"$bindings_json" >/dev/null; then
+    jq -e \
+      --argjson modmask "$modmask" \
+      --argjson keycode "$keycode" \
+      --arg description "$description" '
+        [.[]
+          | select(.modmask == $modmask)
+          | select((.key // "") == "")
+          | select((.keycode // -1) == $keycode)
+          | select((.submap // "") == "")
+        ] as $matches
+        | ($matches | length) == 1
+          and $matches[0].description == $description
+      ' <<<"$bindings_json" >/dev/null
+    return
+  fi
+
+  awk -v expected_keys="$rendered_keys" -v expected_description="$description" '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/[[:space:]]+/, " ", value)
+      return value
+    }
+    {
+      count = split($0, fields, /[[:space:]]+→[[:space:]]+/)
+      if (count != 2 || trim(fields[1]) != expected_keys) next
+      matches++
+      if (trim(fields[2]) == expected_description) stock++
+    }
+    END {
+      exit !(matches == 1 && stock == 1)
+    }
+  ' <<<"$rendered_bindings"
 }
 
 consider_binding() {
@@ -171,6 +226,19 @@ consider_binding() {
   esac
 }
 
+consider_code_binding() {
+  local keys=$1 modmask=$2 keycode=$3 rendered_keys=$4 description=$5
+
+  if ! binding_code_is_unmodified_stock \
+    "$modmask" "$keycode" "$rendered_keys" "$description"; then
+    ((skipped += 1))
+    return
+  fi
+
+  append_lua "hl.unbind(\"$keys\")"
+  ((changed += 1))
+}
+
 # Keep the normal Omarchy entry points useful, but route them to filtered
 # plugin-owned surfaces instead of the disabled stock menu.
 consider_binding "SUPER + SPACE" 64 SPACE "Omarchy menu" menu-root
@@ -189,6 +257,15 @@ consider_binding "SUPER + K" 64 K "Keybindings"
 consider_binding "SUPER + ALT + K" 72 K "Tmux keybindings"
 consider_binding "SUPER + CTRL + K" 68 K "Herdr keybindings"
 consider_binding "SUPER + SHIFT + SPACE" 65 SPACE "Toggle top bar"
+
+# The numbered shortcuts directly open right-side bar panels, bypassing the
+# named Audio, Bluetooth, Display, Network, Power, and other panel bindings.
+for panel in {1..9}; do
+  keycode=$((panel + 9))
+  consider_code_binding \
+    "SUPER + CTRL + code:$keycode" 68 "$keycode" \
+    "SUPER CTRL + $panel" "Bar panel $panel"
+done
 
 # Browser bindings always use the persistent, login-free Kids Chromium profile.
 if [[ $browser_allowed == true ]]; then
@@ -265,6 +342,17 @@ consider_binding "SUPER + CTRL + ALT + D" 76 D "Calendar"
 consider_binding "SUPER + CTRL + W" 68 W "Network"
 consider_binding "SUPER + CTRL + P" 68 P "Power"
 consider_binding "SUPER + CTRL + T" 68 T "Activity"
+
+# Prevent accidental destructive or persistent desktop-state changes while
+# leaving everyday volume, brightness, media, and window controls available.
+consider_binding "CTRL + ALT + DELETE" 12 DELETE "Close all windows"
+consider_binding "SUPER + CTRL + DELETE" 68 DELETE "Toggle laptop display"
+consider_binding "SUPER + CTRL + ALT + DELETE" 76 DELETE "Toggle laptop display mirroring"
+consider_binding "SUPER + SLASH" 64 SLASH "Monitor scaling up"
+consider_binding "SUPER + ALT + SLASH" 72 SLASH "Monitor scaling down"
+consider_binding "XF86TouchpadToggle" 0 XF86TouchpadToggle "Toggle touchpad"
+consider_binding "XF86TouchpadOff" 0 XF86TouchpadOff "Disable touchpad"
+consider_binding "XF86TouchpadOn" 0 XF86TouchpadOn "Enable touchpad"
 
 if ((changed == 0)); then
   json_result enter false 0 "$skipped" false

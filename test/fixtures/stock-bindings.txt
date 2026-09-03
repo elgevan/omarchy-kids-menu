@@ -1,0 +1,9 @@
+SUPER CTRL + 1                      → Bar panel 1
+SUPER CTRL + 2                      → Bar panel 2
+SUPER CTRL + 3                      → Bar panel 3
+SUPER CTRL + 4                      → Bar panel 4
+SUPER CTRL + 5                      → Bar panel 5
+SUPER CTRL + 6                      → Bar panel 6
+SUPER CTRL + 7                      → Bar panel 7
+SUPER CTRL + 8                      → Bar panel 8
+SUPER CTRL + 9                      → My custom panel shortcut

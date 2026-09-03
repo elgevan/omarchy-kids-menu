@@ -148,6 +148,20 @@ binding_description_absent() {
   ! binding_description_present "$1"
 }
 
+binding_descriptions_present() {
+  local description
+  for description in "$@"; do
+    binding_description_present "$description" || return 1
+  done
+}
+
+binding_descriptions_absent() {
+  local description
+  for description in "$@"; do
+    binding_description_absent "$description" || return 1
+  done
+}
+
 youtube_window_with_kids_profile() {
   local pid command
   while read -r pid; do
@@ -211,6 +225,21 @@ wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
   binding_description_absent "Terminal"
 wait_until "Kids Mode blocks the DND bypass shortcut" 20 \
   binding_description_absent "Toggle silencing notifications"
+wait_until "Kids Mode blocks numbered right-side panel shortcuts" 20 \
+  binding_descriptions_absent \
+    "Bar panel 1" "Bar panel 2" "Bar panel 3" \
+    "Bar panel 4" "Bar panel 5" "Bar panel 6" \
+    "Bar panel 7" "Bar panel 8" "Bar panel 9"
+wait_until "Kids Mode blocks the close-all shortcut" 20 \
+  binding_description_absent "Close all windows"
+wait_until "Kids Mode blocks laptop display toggles" 20 \
+  binding_descriptions_absent \
+    "Toggle laptop display" "Toggle laptop display mirroring"
+wait_until "Kids Mode blocks persistent monitor scaling" 20 \
+  binding_descriptions_absent "Monitor scaling up" "Monitor scaling down"
+wait_until "Kids Mode blocks touchpad toggles" 20 \
+  binding_descriptions_absent \
+    "Toggle touchpad" "Disable touchpad" "Enable touchpad"
 binding_description_present "Kids Mode: Omawrite" \
   || fail "selected Omawrite shortcut is not guarded"
 pass "selected Omawrite shortcut is guarded"
@@ -324,6 +353,10 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
     binding_description_present "Omarchy menu"
   wait_until "internal Off restores the terminal shortcut" 20 \
     binding_description_present "Terminal"
+  wait_until "internal Off restores desktop-state shortcuts" 20 \
+    binding_descriptions_present \
+      "Bar panel 1" "Close all windows" "Toggle laptop display" \
+      "Monitor scaling up" "Toggle touchpad"
   wait_until "internal Off removes the transient shortcut layer" 20 \
     binding_description_absent "Kids Mode: Menu"
   manager_on_right || fail "Kids Mode manager remains available while off"
@@ -370,6 +403,10 @@ wait_until "disabling kids mode restores stock shortcuts" 20 \
   binding_description_present "Omarchy menu"
 wait_until "disabling kids mode restores direct app shortcuts" 20 \
   binding_description_present "Terminal"
+wait_until "disabling kids mode restores desktop-state shortcuts" 20 \
+  binding_descriptions_present \
+    "Bar panel 1" "Close all windows" "Toggle laptop display" \
+    "Monitor scaling up" "Toggle touchpad"
 wait_until "disabling kids mode removes Kids shortcut bindings" 20 \
   binding_description_absent "Kids Mode: Menu"
 [[ ! -e $SHORTCUT_MARKER ]] || fail "shortcut marker remains after plugin disable"

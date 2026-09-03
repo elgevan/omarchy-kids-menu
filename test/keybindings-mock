@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+[[ ${1:-} == --print ]]
+cat "$OMARCHY_KIDS_TEST_RENDERED_BINDS"
