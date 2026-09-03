@@ -208,7 +208,8 @@ Panel {
                 ? root.service.hiddenWindowCount > 0
                   ? root.service.hiddenWindowCount + " parent windows hidden • notifications muted"
                   : root.installedAllowedCount + " apps available • notifications muted"
-                : "Normal Omarchy menu active • notifications restored"
+                : ""
+            visible: text.length > 0
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -572,7 +573,7 @@ Panel {
           width: parent.width - resetButton.width - parent.spacing
           anchors.verticalCenter: parent.verticalCenter
           text: root.allowlistEditable
-            ? "App selections are saved automatically across reboots."
+            ? ""
             : "Exit Kids Mode to change available apps."
           color: root.dim
           font.family: root.fontFamily

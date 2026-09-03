@@ -404,8 +404,10 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
 
   omarchy-shell "$MANAGER_ID" show
   wait_until "Kids Mode manager reopens while off" 15 screen_contains "KIDS MODE"
-  wait_until "inactive manager explains that app selection is editable" 15 \
-    screen_contains "App selections are saved automatically"
+  wait_until "inactive manager omits the redundant normal-mode status" 15 \
+    screen_lacks "Normal Omarchy menu active"
+  wait_until "inactive manager omits the redundant persistence hint" 15 \
+    screen_lacks "App selections are saved automatically"
   editable_allowlist_hash=$(sha256sum "$ALLOWLIST" | awk '{print $1}')
   editable_allowlist_snapshot=$(cat "$ALLOWLIST")
   wtype -M ctrl -k 3 -m ctrl

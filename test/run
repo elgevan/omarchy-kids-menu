@@ -27,7 +27,7 @@ rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.13.0" and
+  .version == "0.13.1" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -357,6 +357,11 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ShellIntegration\.activate' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
   || fail "right-side app manager is not mode-gated or wired to the persisted allowlist and quick filters"
+
+if rg -Fq 'Normal Omarchy menu active • notifications restored' "$PLUGIN_ROOT/Panel.qml" \
+  || rg -Fq 'App selections are saved automatically across reboots.' "$PLUGIN_ROOT/Panel.qml"; then
+  fail "manager still contains removed redundant status text"
+fi
 
 rg -q 'setStockMenuDisabled\(config, kidsModeEnabled === true\)' "$PLUGIN_ROOT/ShellIntegration.js" \
   && rg -q 'ShellIntegration\.deactivate' "$PLUGIN_ROOT/Service.qml" \
