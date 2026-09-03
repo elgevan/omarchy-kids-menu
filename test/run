@@ -70,12 +70,23 @@ rg -q 'function remove\(' "$PLUGIN_ROOT/Menu.qml" \
 
 rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'toggleAllowed' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'right-click to choose apps' "$PLUGIN_ROOT/BarWidget.qml" \
-  && rg -q 'Qt\.RightButton' "$PLUGIN_ROOT/BarWidget.qml" \
-  || fail "bar app-management panel is not wired to the persisted allowlist"
+  && rg -q 'managerWidgetId: "omarchy-kids\.manager"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'config\.bar\.layout\.right' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
+  || fail "right-side app manager is not wired to the persisted allowlist"
 
-if rg -q '\\ue900|xdg-terminal-exec' "$PLUGIN_ROOT/BarWidget.qml"; then
-  fail "plugin still uses the stock Omarchy glyph or terminal shortcut"
+rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -q 'omarchy-shell shell toggle omarchy\.menu' "$PLUGIN_ROOT/BarWidget.qml" \
+  || fail "left menu button does not preserve the normal Omarchy symbol"
+
+rg -q 'moduleName: "omarchy-kids\.manager"' "$PLUGIN_ROOT/ManagerWidget.qml" \
+  && rg -q 'text: ""' "$PLUGIN_ROOT/ManagerWidget.qml" \
+  && rg -q 'onPressed: root\.togglePanel' "$PLUGIN_ROOT/ManagerWidget.qml" \
+  || fail "separate Kids manager widget is not a normal standalone bar control"
+
+if rg -q 'xdg-terminal-exec' "$PLUGIN_ROOT/BarWidget.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
+  fail "a kids-mode bar control retains the terminal shortcut"
 fi
 
 if rg -q 'https?://|omarchy-launch-webapp|spotify|youtube|khan' "$MENU"; then

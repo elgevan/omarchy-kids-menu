@@ -8,7 +8,7 @@ There is no Apps submenu. The plugin redirects Omarchy's stock Apps-menu shortcu
 
 The initial allowlist is Google Chrome, Chromium, Omawrite, and Omacalc. These are desktop-entry IDs, not launch commands: a default app appears only when it is installed. Style follows the same rule and is omitted when Omarchy's style commands are unavailable.
 
-Left-click the dedicated child icon in the bar to open the filtered menu. Right-click it to open **Kids Menu Apps**, where any installed desktop app can be added to or removed from the allowlist. The selection is saved to:
+The normal Omarchy symbol stays in its usual place on the left and opens the filtered menu. A separate child icon is installed with the other plugins on the right; click it to open **Kids Menu Apps**, where any installed desktop app can be added to or removed from the allowlist. The selection is saved to:
 
 ```text
 ~/.config/omarchy-kids/allowed-apps.json
@@ -39,7 +39,7 @@ omarchy plugin enable omarchy-kids.menu
 
 ## Scope
 
-The plugin filters the Omarchy menu, stores only desktop-entry IDs in its own config, and removes the menu button's right-click terminal shortcut. It does not install or remove applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent the user from disabling the plugin.
+The plugin filters the Omarchy menu, stores only desktop-entry IDs in its own config, keeps the standard menu symbol on the left, and manages a separate right-side bar control. It removes the menu button's right-click terminal shortcut. It does not install or remove applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent the user from disabling the plugin.
 
 ## Testing
 

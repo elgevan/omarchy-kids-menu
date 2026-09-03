@@ -9,6 +9,7 @@ PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PLUGIN_ID=omarchy-kids.menu
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
+MANAGER_ID=omarchy-kids.manager
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -82,6 +83,26 @@ stock_menu_restored() {
   '
 }
 
+menu_symbol_on_left() {
+  jq -e --arg id "$PLUGIN_ID" '
+    any(.bar.layout.left[]?; ((if type == "object" then .id else . end) == $id))
+  ' "$HOME/.config/omarchy/shell.json"
+}
+
+manager_on_right() {
+  jq -e --arg id "$MANAGER_ID" '
+    any(.bar.layout.right[]?;
+      type == "object" and .id == $id and .type == "qml" and (.source | endswith("/ManagerWidget.qml")))
+  ' "$HOME/.config/omarchy/shell.json"
+}
+
+manager_absent() {
+  jq -e --arg id "$MANAGER_ID" '
+    [.bar.layout.left[]?, .bar.layout.center[]?, .bar.layout.right[]?]
+    | all((if type == "object" then .id else . end) != $id)
+  ' "$HOME/.config/omarchy/shell.json"
+}
+
 cleanup() {
   omarchy-shell shell hide omarchy.menu >/dev/null 2>&1 || true
   if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' >/dev/null; then
@@ -96,6 +117,8 @@ cleanup
 
 omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
 wait_until "kids plugin becomes the active Omarchy menu" 20 plugin_enabled
+wait_until "normal Omarchy menu symbol remains on the left" 20 menu_symbol_on_left
+wait_until "separate Kids manager appears on the right" 20 manager_on_right
 [[ $(omarchy menu ping) == ok ]] || fail "kids menu answers stock menu IPC"
 pass "kids menu answers stock menu IPC"
 
@@ -152,7 +175,7 @@ wtype -k Escape
 wait_until "blocked stock route closes" 15 layer_absent
 
 if rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)|xdg-terminal-exec' \
-  "$installed/Menu.qml" "$installed/Service.qml" "$installed/BarWidget.qml" "$installed/kids-menu.jsonc"; then
+  "$installed/Menu.qml" "$installed/Service.qml" "$installed/BarWidget.qml" "$installed/ManagerWidget.qml" "$installed/kids-menu.jsonc"; then
   fail "installed plugin contains an app/package mutation or terminal shortcut"
 fi
 pass "installed plugin is filter-only"
@@ -163,6 +186,7 @@ pass "installed package set is unchanged"
 
 omarchy plugin disable "$PLUGIN_ID"
 wait_until "disabling kids mode restores the stock menu" 20 stock_menu_restored
+wait_until "disabling kids mode removes the right manager widget" 20 manager_absent
 
 omarchy menu summon root >/dev/null
 wait_until "restored stock menu opens" 15 layer_present

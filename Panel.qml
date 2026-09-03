@@ -4,7 +4,7 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "omarchy-kids.menu"
+  moduleName: "omarchy-kids.manager"
   manageIpc: false
 
   property var anchorItem: null
