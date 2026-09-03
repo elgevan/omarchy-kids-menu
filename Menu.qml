@@ -1,6 +1,7 @@
 import Quickshell
 import QtQuick
 import "Allowlist.js" as Allowlist
+import "KidsBrowser.js" as KidsBrowser
 
 // Reuse the menu implementation shipped by the running Omarchy installation,
 // but point it at this plugin's allowlisted data. This keeps the POC aligned
@@ -25,6 +26,7 @@ Loader {
   readonly property string pluginRoot: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir)
     : ""
+  readonly property string homeDir: Quickshell.env("HOME")
 
   asynchronous: false
   source: omarchyPath
@@ -59,7 +61,18 @@ Loader {
     }
 
     function launch(desktopId, name) {
-      if (root.sourceAppLibrary) root.sourceAppLibrary.launch(desktopId, name)
+      if (!root.sourceAppLibrary) return
+
+      // Chromium launched from Kids Mode gets a persistent, login-free local
+      // profile. The normal Omarchy menu still uses the regular desktop entry.
+      if (KidsBrowser.isChromium(desktopId)) {
+        if (typeof root.sourceAppLibrary.beginLaunchFeedback === "function")
+          root.sourceAppLibrary.beginLaunchFeedback(name)
+        Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir))
+        return
+      }
+
+      root.sourceAppLibrary.launch(desktopId, name)
     }
 
     function refreshIcons() {

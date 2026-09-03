@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "omarchy-kids.menu",
   "name": "Omarchy Kids Menu",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "author": "Omarchy Kids",
   "license": "MIT",
-  "description": "A switchable, authenticated Kids Mode with an app allowlist and muted notifications.",
+  "description": "A switchable, authenticated Kids Mode with an app allowlist, muted notifications, and a separate Chromium profile.",
   "kinds": [
     "menu",
     "bar-widget",

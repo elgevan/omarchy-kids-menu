@@ -83,10 +83,36 @@ assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
 NODE
 
+node - "$PLUGIN_ROOT/KidsBrowser.js" <<'NODE'
+const assert = require("node:assert/strict")
+const browser = require(process.argv[2])
+
+assert.equal(browser.isChromium("chromium"), true)
+assert.equal(browser.isChromium("chromium.desktop"), true)
+assert.equal(browser.isChromium("google-chrome"), false)
+assert.equal(browser.profileDir("/home/kid/"), "/home/kid/.local/share/omarchy-kids/chromium")
+assert.deepEqual(browser.launchCommand("/home/kid"), [
+  "uwsm-app",
+  "--",
+  "/usr/bin/chromium",
+  "--user-data-dir=/home/kid/.local/share/omarchy-kids/chromium",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-sync"
+])
+NODE
+
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
   || fail "menu is not filtering and launching through Omarchy DesktopEntries"
+
+rg -q 'KidsBrowser\.isChromium' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -Fq 'Quickshell.execDetached(KidsBrowser.launchCommand' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q -- '--user-data-dir=' "$PLUGIN_ROOT/KidsBrowser.js" \
+  && rg -q -- '--no-first-run' "$PLUGIN_ROOT/KidsBrowser.js" \
+  && rg -q -- '--disable-sync' "$PLUGIN_ROOT/KidsBrowser.js" \
+  || fail "Kids Mode Chromium is not isolated in its persistent local profile"
 
 rg -q 'item\.userMenuPath = root\.pluginRoot \+ "/empty-menu\.jsonc"' "$PLUGIN_ROOT/Menu.qml" \
   || fail "normal menu extensions can leak unfiltered actions into kids mode"
