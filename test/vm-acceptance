@@ -95,7 +95,9 @@ screenshot success-kids-menu-root
 
 wtype -k Return
 wait_until "allowlisted Apps submenu shows Files" 15 screen_contains Files
-wait_until "allowlisted Apps submenu shows LibreOffice" 15 screen_contains LibreOffice
+wait_until "allowlisted Apps submenu shows Khan Academy" 15 screen_contains "Khan Academy"
+wtype -k Down -k Down
+wait_until "allowlisted Apps submenu scrolls to LibreOffice" 15 screen_contains LibreOffice
 screenshot success-kids-menu-apps
 wtype -k Escape
 wtype -k Escape
@@ -104,8 +106,9 @@ wait_until "kids Apps menu closes" 15 layer_absent
 omarchy menu summon system >/dev/null
 wait_until "filtered System menu opens" 15 layer_present
 wait_until "filtered System menu shows Lock" 15 screen_contains Lock
-wait_until "filtered System menu shows Restart" 15 screen_contains Restart
-wait_until "filtered System menu shows Shut Down" 15 screen_contains "Shut Down"
+wait_until "filtered System menu shows Log Out" 15 screen_contains "Log Out"
+wtype -k Down -k Down -k Down
+wait_until "filtered System menu scrolls to Shut Down" 15 screen_contains "Shut Down"
 screenshot success-kids-menu-system
 wtype -k Escape
 wait_until "filtered System menu closes" 15 layer_absent
