@@ -168,17 +168,17 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: searchInput
-    contentWidth: panel.fittedContentWidth(Style.space(470))
-    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(660))
+    contentWidth: panel.fittedContentWidth(Style.space(440))
+    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(610))
 
     Column {
       id: contentColumn
       width: parent.width
-      spacing: Style.space(10)
+      spacing: Style.space(8)
 
       Row {
         width: parent.width
-        spacing: Style.space(10)
+        spacing: Style.space(8)
 
         Column {
           width: parent.width - modeStatus.width - parent.spacing
@@ -219,8 +219,8 @@ Panel {
         BorderSurface {
           id: modeStatus
           anchors.verticalCenter: parent.verticalCenter
-          implicitWidth: modeStatusText.implicitWidth + Style.space(20)
-          implicitHeight: modeStatusText.implicitHeight + Style.space(11)
+          implicitWidth: modeStatusText.implicitWidth + Style.space(18)
+          implicitHeight: modeStatusText.implicitHeight + Style.space(9)
           radius: height / 2
           color: root.service && root.service.kidsModeEnabled
             ? Style.selectedFillFor(root.accent, root.accent)
@@ -246,7 +246,7 @@ Panel {
       BorderSurface {
         id: modeAction
         width: parent.width
-        height: Style.space(50)
+        height: Style.space(46)
         radius: Style.cornerRadius
         color: root.service && !root.service.kidsModeEnabled
           ? Style.selectedFillFor(root.accent, root.accent)
@@ -262,9 +262,9 @@ Panel {
 
         Column {
           anchors.left: parent.left
-          anchors.leftMargin: Style.space(14)
+          anchors.leftMargin: Style.space(12)
           anchors.right: modeActionArrow.left
-          anchors.rightMargin: Style.space(12)
+          anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(1)
 
@@ -302,7 +302,7 @@ Panel {
         Text {
           id: modeActionArrow
           anchors.right: parent.right
-          anchors.rightMargin: Style.space(16)
+          anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           text: "›"
           color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
@@ -323,14 +323,14 @@ Panel {
 
       BorderSurface {
         width: parent.width
-        height: Style.space(42)
+        height: Style.space(38)
         radius: Style.cornerRadius
         color: Style.normalFillFor(root.foreground, root.accent)
         borderSpec: Border.controlSpec(searchInput.activeFocus ? "selected" : "normal", searchInput.activeFocus ? root.accent : root.foreground, root.accent)
 
         Text {
           anchors.left: parent.left
-          anchors.leftMargin: Style.space(12)
+          anchors.leftMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
           text: ""
           color: searchInput.activeFocus ? root.accent : root.dim
@@ -341,9 +341,9 @@ Panel {
         TextInput {
           id: searchInput
           anchors.left: parent.left
-          anchors.leftMargin: Style.space(38)
+          anchors.leftMargin: Style.space(34)
           anchors.right: parent.right
-          anchors.rightMargin: Style.space(12)
+          anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
           color: root.foreground
           selectionColor: root.accent
@@ -408,7 +408,7 @@ Panel {
 
       Row {
         width: parent.width
-        spacing: Style.space(8)
+        spacing: Style.space(6)
 
         Repeater {
           model: selectionFilterModel
@@ -420,8 +420,8 @@ Panel {
 
             readonly property bool selected: root.selectionFilter === filterButton.filterKey
 
-            width: (contentColumn.width - Style.space(16)) / 3
-            height: Style.space(34)
+            width: (contentColumn.width - Style.space(12)) / 3
+            height: Style.space(32)
             radius: height / 2
             color: filterButton.selected
               ? Style.selectedFillFor(root.accent, root.accent)
@@ -456,7 +456,7 @@ Panel {
 
       Item {
         width: parent.width
-        height: Style.space(400)
+        height: Style.space(360)
 
         Text {
           visible: appModel.count === 0
@@ -472,7 +472,7 @@ Panel {
           anchors.fill: parent
           model: appModel
           clip: true
-          spacing: Style.space(4)
+          spacing: Style.space(2)
           boundsBehavior: Flickable.StopAtBounds
           currentIndex: appModel.count > 0 ? 0 : -1
 
@@ -486,7 +486,7 @@ Panel {
             required property bool appAllowed
 
             width: ListView.view.width
-            height: Style.space(56)
+            height: Style.space(50)
             radius: Style.cornerRadius
             color: rowMouse.containsMouse || appList.currentIndex === appRow.index
               ? Style.hoverFillFor(root.accent, root.accent)
@@ -498,9 +498,9 @@ Panel {
             Image {
               id: iconImage
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(12)
+              anchors.leftMargin: Style.space(10)
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(30)
+              width: Style.space(26)
               height: width
               source: appRow.appIcon
               fillMode: Image.PreserveAspectFit
@@ -511,9 +511,9 @@ Panel {
 
             Column {
               anchors.left: iconImage.right
-              anchors.leftMargin: Style.space(10)
+              anchors.leftMargin: Style.space(8)
               anchors.right: stateText.left
-              anchors.rightMargin: Style.space(10)
+              anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(1)
 
@@ -541,7 +541,7 @@ Panel {
             Text {
               id: stateText
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(14)
+              anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
               text: appRow.appAllowed ? "✓" : root.allowlistEditable ? "+" : "—"
               color: appRow.appAllowed && root.allowlistEditable ? root.accent : root.dim
@@ -567,7 +567,7 @@ Panel {
 
       Row {
         width: parent.width
-        spacing: Style.space(8)
+        spacing: Style.space(6)
 
         Text {
           width: parent.width - resetButton.width - parent.spacing
@@ -583,8 +583,8 @@ Panel {
 
         BorderSurface {
           id: resetButton
-          implicitWidth: resetLabel.implicitWidth + Style.space(20)
-          implicitHeight: resetLabel.implicitHeight + Style.space(10)
+          implicitWidth: resetLabel.implicitWidth + Style.space(16)
+          implicitHeight: resetLabel.implicitHeight + Style.space(8)
           radius: height / 2
           opacity: root.allowlistEditable ? 1 : 0.45
           color: resetMouse.containsMouse && root.allowlistEditable
