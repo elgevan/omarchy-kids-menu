@@ -53,6 +53,16 @@ omarchy plugin disable io.github.elgevan.omarchy-kids
 omarchy plugin enable io.github.elgevan.omarchy-kids
 ```
 
+## Remove
+
+Remove the plugin through Omarchy's standard plugin lifecycle:
+
+```bash
+omarchy plugin remove io.github.elgevan.omarchy-kids
+```
+
+Omarchy disables the plugin before removing its checkout. During that disable step, the plugin restores the stock menu and bar layout, the normal shortcut set, hidden parent windows, and the notification preference that was active before Kids Mode. The saved allowlist, mode preference, and Kids Chromium profile remain in the user's home directory so they are available after a reinstall.
+
 ## Scope
 
 The plugin filters the Omarchy menu, stores desktop-entry IDs and its mode in its own config, routes browser and web-app entries through a separate user-owned Chromium profile while Kids Mode is on, temporarily filters recognized stock Omarchy shortcuts at runtime, temporarily moves existing windows without closing them, temporarily controls Omarchy's Do Not Disturb state, keeps the standard menu symbol on the left, and manages a separate right-side bar control. It removes the menu button's right-click terminal shortcut. It does not install or remove applications, modify persistent Hyprland configuration, restrict terminal commands entered through another route, filter the web, override user-customized shortcuts, or prevent a knowledgeable user from disabling the plugin or reaching the hidden workspace through another route. Authentication protects the in-app Exit action; it is not a system security boundary.

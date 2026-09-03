@@ -20,6 +20,10 @@ fail() {
 
 [[ -f $PLUGIN_ROOT/LICENSE ]] || fail "repository license is missing"
 
+rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'omarchy plugin remove io.github.elgevan.omarchy-kids' "$PLUGIN_ROOT/README.md" \
+  || fail "README does not include standard plugin removal instructions"
+
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
