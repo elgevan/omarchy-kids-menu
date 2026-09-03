@@ -4,7 +4,7 @@ This proof-of-concept Omarchy plugin replaces the stock `omarchy.menu` while ena
 
 The plugin uses Omarchy's `omarchy.clonedFrom` contract, so existing menu keybindings and IPC calls continue targeting `omarchy.menu`. Disabling the plugin restores the stock menu automatically.
 
-There is no visible Apps submenu. A hidden compatibility route makes Omarchy's stock Apps-menu shortcut (`Super+Alt+Space`) open the flattened root menu.
+There is no Apps submenu. The plugin redirects Omarchy's stock Apps-menu shortcut (`Super+Alt+Space`) to the flattened root menu.
 
 ## Install
 

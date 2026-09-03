@@ -1,5 +1,4 @@
 {
-  "apps": {"label":"Apps","target":"root","when":"false"},
   "style": {"icon":"","label":"Style"},
   "system": {"icon":"","label":"System"},
 

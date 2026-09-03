@@ -22,6 +22,20 @@ Loader {
     ? "file://" + omarchyPath + "/shell/plugins/menu/Menu.qml"
     : ""
 
+  function normalizedPayload(payloadJson) {
+    var raw = payloadJson || "{}"
+    try {
+      var payload = JSON.parse(raw)
+      if (payload && payload.menu === "apps") {
+        payload.menu = "root"
+        return JSON.stringify(payload)
+      }
+    } catch (error) {
+      // Let the stock menu handle malformed or non-JSON payloads as usual.
+    }
+    return raw
+  }
+
   function configureMenu() {
     if (!item) return
 
@@ -44,11 +58,12 @@ Loader {
   }
 
   function open(payloadJson) {
+    var payload = normalizedPayload(payloadJson)
     if (item) {
       configureMenu()
-      item.open(payloadJson)
+      item.open(payload)
     } else {
-      pendingPayload = payloadJson || "{}"
+      pendingPayload = payload
       hasPendingPayload = true
     }
   }
