@@ -2,9 +2,11 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "Allowlist.js" as Allowlist
+import "NotificationState.js" as NotificationState
 
-// Shared state for the menu and its bar-panel editor. This service only reads
-// DesktopEntries and writes the plugin's own allowlist file.
+// Shared state for the menu and its bar-panel editor. The service reads
+// DesktopEntries, writes plugin-owned state, and temporarily enables Omarchy's
+// built-in Do Not Disturb mode while Kids Mode is active.
 Item {
   id: root
 
@@ -15,10 +17,25 @@ Item {
   property var allowedDesktopIds: Allowlist.defaultIds()
   property bool directoryReady: false
   property bool writePending: false
+  property bool notificationStateLoaded: false
+  property bool notificationStateManaged: false
+  property bool notificationRestoreDnd: false
+  property bool notificationApplied: false
+  property int notificationSetupAttempts: 0
 
+  readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
   readonly property string configPath: configDir + "/allowed-apps.json"
+  readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
+  readonly property string stateDir: stateRoot + "/omarchy-kids"
+  readonly property string notificationStatePath: stateDir + "/notifications.json"
   readonly property var defaultDesktopIds: Allowlist.defaultIds()
+  readonly property var notificationService: root.shell && typeof root.shell.serviceFor === "function"
+    ? root.shell.serviceFor("omarchy.notifications")
+    : null
+  readonly property bool notificationsMuted: root.notificationApplied
+    && root.notificationService
+    && root.notificationService.doNotDisturb === true
   readonly property string managerWidgetId: "omarchy-kids.manager"
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
@@ -88,6 +105,54 @@ Item {
     if (!root.writePending) return
     root.writePending = false
     settingsFile.setText(Allowlist.settingsText(root.allowedDesktopIds))
+  }
+
+  function loadNotificationState(rawText) {
+    var state = NotificationState.parseState(rawText)
+    root.notificationStateManaged = state.managed
+    root.notificationRestoreDnd = state.restoreDnd
+    root.notificationStateLoaded = true
+    root.scheduleNotificationSetup()
+  }
+
+  function applyNotificationPolicy() {
+    var notifications = root.notificationService
+    if (!root.directoryReady || !root.notificationStateLoaded || !notifications
+        || notifications.settingsLoaded !== true)
+      return false
+
+    if (!root.notificationStateManaged) {
+      root.notificationRestoreDnd = notifications.doNotDisturb === true
+      root.notificationStateManaged = true
+      // Persist the restore point before changing the global DND state.
+      notificationStateFile.setText(NotificationState.stateText(
+        true, root.notificationRestoreDnd))
+    }
+
+    notifications.setDoNotDisturb(true)
+    root.notificationApplied = true
+    return true
+  }
+
+  function scheduleNotificationSetup() {
+    root.notificationSetupAttempts = 0
+    notificationSetup.restart()
+  }
+
+  function releaseNotificationPolicy() {
+    if (!root.notificationStateLoaded || !root.notificationStateManaged) return
+    var notifications = root.notificationService
+    if (!notifications || notifications.settingsLoaded !== true) {
+      console.warn("omarchy-kids: could not restore notification state")
+      return
+    }
+
+    // Clear our ownership marker first. A future enable will then capture the
+    // user's current DND preference as a fresh restore point.
+    notificationStateFile.setText(NotificationState.stateText(false, false))
+    root.notificationStateManaged = false
+    root.notificationApplied = false
+    notifications.setDoNotDisturb(root.notificationRestoreDnd)
   }
 
   function managerEntryMatches(entry) {
@@ -171,12 +236,41 @@ Item {
     onFileChanged: reload()
   }
 
+  FileView {
+    id: notificationStateFile
+    path: root.notificationStatePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadNotificationState(text())
+    onLoadFailed: root.loadNotificationState("")
+    onFileChanged: reload()
+  }
+
   Process {
     id: ensureDirectory
-    command: ["mkdir", "-p", root.configDir]
+    command: ["mkdir", "-p", root.configDir, root.stateDir]
     onExited: function(exitCode) {
       root.directoryReady = exitCode === 0
-      if (root.directoryReady) root.flushWrite()
+      if (root.directoryReady) {
+        root.flushWrite()
+        root.scheduleNotificationSetup()
+      }
+    }
+  }
+
+  Timer {
+    id: notificationSetup
+    interval: 100
+    repeat: true
+    onTriggered: {
+      root.notificationSetupAttempts++
+      if (root.applyNotificationPolicy()) {
+        stop()
+      } else if (root.notificationSetupAttempts >= 100) {
+        console.warn("omarchy-kids: notification service was not ready")
+        stop()
+      }
     }
   }
 
@@ -186,16 +280,23 @@ Item {
     onTriggered: root.ensureManagerWidget()
   }
 
-  onShellChanged: managerSetup.restart()
+  onShellChanged: {
+    managerSetup.restart()
+    root.scheduleNotificationSetup()
+  }
   onManifestChanged: managerSetup.restart()
+  onNotificationServiceChanged: root.scheduleNotificationSetup()
 
   Component.onCompleted: {
     ensureDirectory.running = true
     managerSetup.restart()
+    root.scheduleNotificationSetup()
   }
 
   Component.onDestruction: {
-    if (root.pluginRegistry && !root.pluginRegistry.isEnabled("omarchy-kids.menu"))
+    if (root.pluginRegistry && !root.pluginRegistry.isEnabled("omarchy-kids.menu")) {
+      root.releaseNotificationPolicy()
       root.removeManagerWidget()
+    }
   }
 }

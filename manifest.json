@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "omarchy-kids.menu",
   "name": "Omarchy Kids Menu",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "Omarchy Kids",
   "license": "MIT",
-  "description": "An installed-app allowlist that replaces the standard Omarchy menu while enabled.",
+  "description": "An installed-app allowlist and notification-muted Kids Mode for the Omarchy menu.",
   "kinds": [
     "menu",
     "bar-widget",

@@ -56,6 +56,22 @@ assert.deepEqual(
 )
 NODE
 
+node - "$PLUGIN_ROOT/NotificationState.js" <<'NODE'
+const assert = require("node:assert/strict")
+const state = require(process.argv[2])
+
+assert.deepEqual(state.parseState(""), {managed: false, restoreDnd: false})
+assert.deepEqual(state.parseState("not json"), {managed: false, restoreDnd: false})
+assert.deepEqual(
+  state.parseState(JSON.stringify({version: 1, managed: true, restoreDnd: true})),
+  {managed: true, restoreDnd: true}
+)
+assert.deepEqual(
+  JSON.parse(state.stateText(true, false)),
+  {version: 1, managed: true, restoreDnd: false}
+)
+NODE
+
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
@@ -78,6 +94,13 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'config\.bar\.layout\.right' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
   || fail "right-side app manager is not wired to the persisted allowlist and quick filters"
+
+rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'setDoNotDisturb\(true\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'notifications\.setDoNotDisturb\(root\.notificationRestoreDnd\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'NotificationState\.stateText\(false, false\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'notifications muted' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "Kids Mode does not mute notifications and restore the previous DND state"
 
 rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \

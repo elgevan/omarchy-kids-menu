@@ -145,7 +145,9 @@ Panel {
 
           Text {
             width: parent.width
-            text: "Choose which installed apps appear"
+            text: root.service && root.service.notificationsMuted
+              ? "Choose apps • notifications muted"
+              : "Choose which installed apps appear"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
