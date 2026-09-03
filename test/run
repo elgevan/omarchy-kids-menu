@@ -1,0 +1,58 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+MANIFEST="$PLUGIN_ROOT/manifest.json"
+MENU="$PLUGIN_ROOT/kids-menu.jsonc"
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+jq -e '
+  .schemaVersion == 1 and
+  .id == "omarchy-kids.menu" and
+  .kinds == ["menu", "bar-widget"] and
+  .entryPoints.menu == "Menu.qml" and
+  .entryPoints.barWidget == "BarWidget.qml" and
+  .omarchy.clonedFrom == "omarchy.menu"
+' "$MANIFEST" >/dev/null || fail "manifest does not declare a menu clone"
+
+jq -e . "$MENU" >/dev/null || fail "kids menu is not valid JSONC/JSON"
+
+root_ids=$(jq -r 'keys[] | select(contains(".") | not)' "$MENU" | sort)
+[[ $root_ids == $'apps\nstyle\nsystem' ]] || fail "unexpected root menus: $root_ids"
+
+jq -e '
+  .apps.provider == null and
+  has("learn") == false and
+  has("trigger") == false and
+  has("setup") == false and
+  has("install") == false and
+  has("remove") == false and
+  has("update") == false and
+  has("about") == false
+' "$MENU" >/dev/null || fail "menu exposes a non-allowlisted provider or stock section"
+
+for label in Files PDFs LibreOffice "YouTube Kids" Spotify "Khan Academy" Web; do
+  jq -e --arg label "$label" 'to_entries | any(.value.label == $label)' "$MENU" >/dev/null \
+    || fail "missing always-visible app: $label"
+done
+
+for label in Lock Suspend "Log Out" Restart "Shut Down"; do
+  jq -e --arg label "$label" 'to_entries | any(.value.label == $label)' "$MENU" >/dev/null \
+    || fail "missing system action: $label"
+done
+
+if rg -q 'provider[^\n]*apps|xdg-terminal-exec|omarchy-(install|pkg|remove)' \
+  "$PLUGIN_ROOT/Menu.qml" "$PLUGIN_ROOT/BarWidget.qml" "$MENU"; then
+  fail "plugin contains a dynamic app provider, terminal shortcut, or package-management action"
+fi
+
+validator=${OMARCHY_PLUGIN_VALIDATOR:-$(command -v omarchy-plugin-validate || true)}
+[[ -n $validator ]] || fail "omarchy-plugin-validate is unavailable"
+"$validator" "$PLUGIN_ROOT"
+
+echo "Omarchy Kids Menu plugin checks passed"

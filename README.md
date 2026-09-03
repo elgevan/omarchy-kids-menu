@@ -1,0 +1,34 @@
+# Omarchy Kids Menu
+
+This proof-of-concept Omarchy plugin replaces the stock `omarchy.menu` while enabled. It presents only a static allowlist of applications, two appearance controls, and essential session and power actions. It is a convenience filter, not a security boundary.
+
+The plugin uses Omarchy's `omarchy.clonedFrom` contract, so existing menu keybindings and IPC calls continue targeting `omarchy.menu`. Disabling the plugin restores the stock menu automatically.
+
+## Install
+
+Publish or clone this directory as its own Git repository, then run:
+
+```bash
+omarchy plugin add https://example.com/omarchy-kids-menu.git --enable
+```
+
+For local development, copy the directory to `~/.config/omarchy/plugins/omarchy-kids.menu`, then run:
+
+```bash
+omarchy plugin validate ~/.config/omarchy/plugins/omarchy-kids.menu
+omarchy-shell shell rescanPlugins
+omarchy plugin enable omarchy-kids.menu
+```
+
+Switch between the two menus with:
+
+```bash
+omarchy plugin disable omarchy-kids.menu
+omarchy plugin enable omarchy-kids.menu
+```
+
+An optional guardian-managed extension can be placed at `~/.config/omarchy-kids/menu.jsonc`. It is merged only with the kids menu; the normal Omarchy user-menu extension is intentionally not loaded while this plugin is active.
+
+## Scope
+
+The plugin filters the Omarchy menu and removes the menu button's right-click terminal shortcut. It does not remove installed applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent the user from disabling the plugin.
