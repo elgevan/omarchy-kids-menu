@@ -5,6 +5,7 @@ set -Eeuo pipefail
 PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 MANIFEST="$PLUGIN_ROOT/manifest.json"
 MENU="$PLUGIN_ROOT/kids-menu.jsonc"
+EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
 
 bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance"
 
@@ -16,51 +17,77 @@ fail() {
 jq -e '
   .schemaVersion == 1 and
   .id == "omarchy-kids.menu" and
-  .kinds == ["menu", "bar-widget"] and
+  .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
+  .entryPoints.service == "Service.qml" and
   .omarchy.clonedFrom == "omarchy.menu"
-' "$MANIFEST" >/dev/null || fail "manifest does not declare a menu clone"
+' "$MANIFEST" >/dev/null || fail "manifest does not declare a menu/bar/service clone"
 
 jq -e . "$MENU" >/dev/null || fail "kids menu is not valid JSONC/JSON"
-
-root_ids=$(jq -r 'keys[] | select(contains(".") | not)' "$MENU" | sort)
-[[ $root_ids == $'files\ngames\ngcompris\nkhan-academy\noffice\npdfs\nscratch\nspotify\nstellarium\nstyle\nsystem\ntuxpaint\nweb\nyoutube-kids' ]] \
-  || fail "unexpected root entries: $root_ids"
+jq -e 'keys | length == 0' "$EMPTY_MENU" >/dev/null || fail "menu extension guard is not empty"
 
 jq -e '
-  has("apps") == false and
-  ([keys[] | select(startswith("apps."))] | length) == 0 and
-  has("learn") == false and
-  has("trigger") == false and
-  has("setup") == false and
-  has("install") == false and
-  has("remove") == false and
-  has("update") == false and
-  has("about") == false
-' "$MENU" >/dev/null || fail "menu has an Apps submenu, exposes a non-allowlisted provider, or contains a stock section"
+  (keys | sort) == ["apps", "style", "style.background", "style.theme"] and
+  .apps.provider == "apps" and
+  .style.parent == "apps" and
+  .style.label == "Style" and
+  (.style.when | contains("omarchy-theme")) and
+  ([to_entries[] | select(.value.action? != null) | .key] | sort) == ["style.background", "style.theme"]
+' "$MENU" >/dev/null || fail "menu is not a flat installed-app provider plus optional Style"
 
-rg -q 'payload\.menu === "apps"' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'payload\.menu = "root"' "$PLUGIN_ROOT/Menu.qml" \
-  || fail "stock Apps route is not redirected to the flattened root"
+node - "$PLUGIN_ROOT/Allowlist.js" <<'NODE'
+const assert = require("node:assert/strict")
+const allowlist = require(process.argv[2])
 
-for label in Files PDFs LibreOffice "YouTube Kids" Spotify "Khan Academy" Web; do
-  jq -e --arg label "$label" 'to_entries | any(.value.label == $label)' "$MENU" >/dev/null \
-    || fail "missing always-visible app: $label"
-done
+assert.deepEqual(allowlist.defaultIds(), ["chromium", "google-chrome", "omacalc", "omawrite"])
+assert.deepEqual(allowlist.parseSettings("not json"), allowlist.defaultIds())
+assert.deepEqual(
+  allowlist.parseSettings(JSON.stringify({version: 1, allowedDesktopIds: []})),
+  []
+)
+assert.deepEqual(
+  allowlist.filterRows([
+    {entry: {id: "chromium"}},
+    {entry: {id: "org.gnome.Nautilus"}},
+    {entry: {id: "omawrite.desktop"}}
+  ], allowlist.defaultIds()).map(row => row.entry.id),
+  ["chromium", "omawrite.desktop"]
+)
+NODE
 
-for label in Lock Suspend "Log Out" Restart "Shut Down"; do
-  jq -e --arg label "$label" 'to_entries | any(.value.label == $label)' "$MENU" >/dev/null \
-    || fail "missing system action: $label"
-done
+rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
+  || fail "menu is not filtering and launching through Omarchy DesktopEntries"
 
-if rg -q 'provider[^\n]*apps|xdg-terminal-exec|omarchy-(install|pkg|remove)' \
-  "$PLUGIN_ROOT/Menu.qml" "$PLUGIN_ROOT/BarWidget.qml" "$MENU"; then
-  fail "plugin contains a dynamic app provider, terminal shortcut, or package-management action"
+rg -q 'item\.userMenuPath = root\.pluginRoot \+ "/empty-menu\.jsonc"' "$PLUGIN_ROOT/Menu.qml" \
+  || fail "normal menu extensions can leak unfiltered actions into kids mode"
+
+rg -q 'function remove\(' "$PLUGIN_ROOT/Menu.qml" \
+  && ! rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)' "$PLUGIN_ROOT/Menu.qml" "$PLUGIN_ROOT/Service.qml" "$MENU" \
+  || fail "plugin can install, uninstall, or remove an application"
+
+rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'toggleAllowed' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'right-click to choose apps' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -q 'Qt\.RightButton' "$PLUGIN_ROOT/BarWidget.qml" \
+  || fail "bar app-management panel is not wired to the persisted allowlist"
+
+if rg -q '\\ue900|xdg-terminal-exec' "$PLUGIN_ROOT/BarWidget.qml"; then
+  fail "plugin still uses the stock Omarchy glyph or terminal shortcut"
+fi
+
+if rg -q 'https?://|omarchy-launch-webapp|spotify|youtube|khan' "$MENU"; then
+  fail "menu contains a hard-coded web app"
 fi
 
 validator=${OMARCHY_PLUGIN_VALIDATOR:-$(command -v omarchy-plugin-validate || true)}
 [[ -n $validator ]] || fail "omarchy-plugin-validate is unavailable"
 "$validator" "$PLUGIN_ROOT"
+
+for file in "$PLUGIN_ROOT"/*.qml; do
+  qmllint -I /usr/share/omarchy/shell "$file"
+done
 
 echo "Omarchy Kids Menu plugin checks passed"

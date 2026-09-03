@@ -1,5 +1,6 @@
 import Quickshell
 import QtQuick
+import "Allowlist.js" as Allowlist
 
 // Reuse the menu implementation shipped by the running Omarchy installation,
 // but point it at this plugin's allowlisted data. This keeps the POC aligned
@@ -13,6 +14,11 @@ Loader {
   property string pendingPayload: ""
   property bool hasPendingPayload: false
 
+  readonly property var sourceAppLibrary: shell ? shell.appLibrary : null
+  readonly property var allowlistService: shell && typeof shell.serviceFor === "function"
+    ? shell.serviceFor("omarchy-kids.menu")
+    : null
+
   readonly property string pluginRoot: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir)
     : ""
@@ -22,12 +28,71 @@ Loader {
     ? "file://" + omarchyPath + "/shell/plugins/menu/Menu.qml"
     : ""
 
+  // The stock menu keeps all of its normal launch/icon behavior, but sees a
+  // read-only filtered view of DesktopEntries. In particular, remove() is a
+  // deliberate no-op: this plugin never uninstalls applications.
+  QtObject {
+    id: filteredAppLibrary
+    signal appsChanged()
+
+    function sortedEntries(query) {
+      if (!root.sourceAppLibrary || !root.allowlistService) return []
+      return Allowlist.filterRows(
+        root.sourceAppLibrary.sortedEntries(query),
+        root.allowlistService.allowedDesktopIds
+      )
+    }
+
+    function entryName(entry) {
+      return root.sourceAppLibrary ? root.sourceAppLibrary.entryName(entry) : ""
+    }
+
+    function entrySubtext(entry) {
+      return root.sourceAppLibrary ? root.sourceAppLibrary.entrySubtext(entry) : ""
+    }
+
+    function iconSource(icon) {
+      return root.sourceAppLibrary ? root.sourceAppLibrary.iconSource(icon) : ""
+    }
+
+    function launch(desktopId, name) {
+      if (root.sourceAppLibrary) root.sourceAppLibrary.launch(desktopId, name)
+    }
+
+    function refreshIcons() {
+      if (root.sourceAppLibrary) root.sourceAppLibrary.refreshIcons()
+    }
+
+    function remove(desktopId, name) {
+      if (root.shell)
+        Quickshell.execDetached(["omarchy-notification-send", "Kids Menu only filters apps. Use its bar icon to change the list."])
+    }
+  }
+
+  QtObject {
+    id: filteredShell
+    property var appLibrary: filteredAppLibrary
+  }
+
+  Connections {
+    target: root.sourceAppLibrary
+    function onAppsChanged() { filteredAppLibrary.appsChanged() }
+  }
+
+  Connections {
+    target: root.allowlistService
+    function onAllowlistChanged() { filteredAppLibrary.appsChanged() }
+  }
+
   function normalizedPayload(payloadJson) {
     var raw = payloadJson || "{}"
     try {
       var payload = JSON.parse(raw)
-      if (payload && payload.menu === "apps") {
-        payload.menu = "root"
+      if (payload && payload.mode !== "select" && payload.mode !== "input") {
+        var route = String(payload.initialMenu || payload.menu || "root")
+        if (route !== "style" && route.indexOf("style.") !== 0) route = "apps"
+        if (payload.initialMenu !== undefined) payload.initialMenu = route
+        else payload.menu = route
         return JSON.stringify(payload)
       }
     } catch (error) {
@@ -40,12 +105,14 @@ Loader {
     if (!item) return
 
     item.omarchyPath = root.omarchyPath
-    item.shell = root.shell
+    item.shell = filteredShell
     item.manifest = root.manifest
 
     if (root.pluginRoot) {
       item.defaultMenuPath = root.pluginRoot + "/kids-menu.jsonc"
-      item.userMenuPath = Quickshell.env("HOME") + "/.config/omarchy-kids/menu.jsonc"
+      // App additions are handled by the DesktopEntries allowlist service,
+      // not by arbitrary menu actions from Omarchy's normal user extension.
+      item.userMenuPath = root.pluginRoot + "/empty-menu.jsonc"
       item.refresh()
     }
 

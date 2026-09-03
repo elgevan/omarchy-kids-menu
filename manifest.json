@@ -2,24 +2,27 @@
   "schemaVersion": 1,
   "id": "omarchy-kids.menu",
   "name": "Omarchy Kids Menu",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Omarchy Kids",
   "license": "MIT",
-  "description": "A small allowlisted menu that replaces the standard Omarchy menu while enabled.",
+  "description": "An installed-app allowlist that replaces the standard Omarchy menu while enabled.",
   "kinds": [
     "menu",
-    "bar-widget"
+    "bar-widget",
+    "service"
   ],
   "keepLoaded": true,
   "entryPoints": {
     "menu": "Menu.qml",
-    "barWidget": "BarWidget.qml"
+    "barWidget": "BarWidget.qml",
+    "service": "Service.qml"
   },
   "barWidget": {
     "displayName": "Kids Menu",
     "description": "Opens the allowlisted Omarchy Kids menu.",
     "category": "Compositor",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "left"
   },
   "omarchy": {
     "clonedFrom": "omarchy.menu"

@@ -1,26 +1,6 @@
 {
-  "style": {"icon":"","label":"Style"},
-  "system": {"icon":"","label":"System"},
-
-  "files": {"icon":"","label":"Files","action":"uwsm-app -- nautilus --new-window"},
-  "pdfs": {"icon":"","label":"PDFs","action":"uwsm-app -- evince"},
-  "office": {"icon":"󰈙","label":"LibreOffice","action":"uwsm-app -- libreoffice"},
-  "gcompris": {"icon":"󰌢","label":"GCompris","when":"omarchy-cmd-present gcompris-qt","action":"uwsm-app -- gcompris-qt"},
-  "tuxpaint": {"icon":"󰏘","label":"Tux Paint","when":"omarchy-cmd-present tuxpaint","action":"uwsm-app -- tuxpaint"},
-  "stellarium": {"icon":"󰽥","label":"Stellarium","when":"omarchy-cmd-present stellarium","action":"uwsm-app -- stellarium"},
-  "scratch": {"icon":"󰨞","label":"Scratch","when":"omarchy-cmd-present scratch","action":"uwsm-app -- scratch"},
-  "youtube-kids": {"icon":"","label":"YouTube Kids","description":"Guardian setup required","action":"omarchy-launch-webapp 'https://www.youtubekids.com/'"},
-  "spotify": {"icon":"","label":"Spotify","description":"Use a managed account","action":"omarchy-launch-webapp 'https://open.spotify.com/'"},
-  "khan-academy": {"icon":"","label":"Khan Academy","description":"Free lessons and practice","action":"omarchy-launch-webapp 'https://www.khanacademy.org/'"},
-  "web": {"icon":"","label":"Web","action":"omarchy-launch-browser"},
-  "games": {"icon":"","label":"Game Library","description":"Steam Family","when":"omarchy-cmd-present steam","action":"uwsm-app -- steam steam://open/games"},
-
-  "style.theme": {"icon":"󰸌","label":"Theme","action":"theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set \"$theme\""},
-  "style.background": {"icon":"","label":"Background","action":"background=$(omarchy-theme-bg-switcher); [[ -n $background ]] && omarchy-theme-bg-set \"$background\""},
-
-  "system.lock": {"icon":"","label":"Lock","action":"omarchy-system-lock"},
-  "system.suspend": {"icon":"󰒲","label":"Suspend","when":"! omarchy-toggle-enabled suspend-off","action":"systemctl suspend"},
-  "system.logout": {"icon":"󰍃","label":"Log Out","action":"omarchy-system-logout"},
-  "system.reboot": {"icon":"󰜉","label":"Restart","action":"omarchy-system-reboot"},
-  "system.shutdown": {"icon":"󰐥","label":"Shut Down","action":"omarchy-system-shutdown"}
+  "apps": {"label":"Kids","provider":"apps"},
+  "style": {"parent":"apps","icon":"","label":"Style","when":"omarchy-cmd-present omarchy-theme-switcher || omarchy-cmd-present omarchy-theme-bg-switcher"},
+  "style.theme": {"icon":"󰸌","label":"Theme","when":"omarchy-cmd-present omarchy-theme-switcher","action":"theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set \"$theme\""},
+  "style.background": {"icon":"","label":"Background","when":"omarchy-cmd-present omarchy-theme-bg-switcher","action":"background=$(omarchy-theme-bg-switcher); [[ -n $background ]] && omarchy-theme-bg-set \"$background\""}
 }
