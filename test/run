@@ -6,6 +6,8 @@ PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 MANIFEST="$PLUGIN_ROOT/manifest.json"
 MENU="$PLUGIN_ROOT/kids-menu.jsonc"
 
+bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance"
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1

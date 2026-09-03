@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# Run inside a disposable, installed Omarchy graphical session. The caller
+# must copy this Git repository into the guest before invoking the script.
+
+set -Eeuo pipefail
+
+PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+PLUGIN_ID=omarchy-kids.menu
+ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
+
+mkdir -p "$ARTIFACTS"
+
+pass() {
+  printf 'ok - %s\n' "$1"
+}
+
+screenshot() {
+  timeout 10 grim "$ARTIFACTS/$1.png" 2>/dev/null || true
+}
+
+fail() {
+  local description=$1
+  local detail=${2:-}
+  [[ -n $detail ]] && printf '%s\n' "$detail" >&2
+  screenshot "failure-${description// /-}"
+  printf 'not ok - %s\n' "$description" >&2
+  exit 1
+}
+
+wait_until() {
+  local description=$1 timeout_seconds=$2
+  shift 2
+  local deadline=$((SECONDS + timeout_seconds))
+
+  until "$@" >/dev/null 2>&1; do
+    (( SECONDS < deadline )) || fail "$description" "timed out after ${timeout_seconds}s"
+    sleep 1
+  done
+  pass "$description"
+}
+
+layer_present() {
+  hyprctl -j layers | jq -e '[.. | objects | select(.namespace? == "omarchy-menu")] | length > 0'
+}
+
+layer_absent() {
+  ! layer_present
+}
+
+screen_contains() {
+  local text=$1 snapshot=/tmp/omarchy-kids-menu-ocr.png
+  timeout 10 grim -s 2 "$snapshot" 2>/dev/null || return 1
+  tesseract "$snapshot" stdout --psm 11 2>/dev/null | grep -Fi -- "$text" >/dev/null
+}
+
+plugin_enabled() {
+  omarchy plugin list --json | jq -e --arg id "$PLUGIN_ID" '
+    any(.[]; .id == $id and .enabled == true and .active == true and .clonedFrom == "omarchy.menu")
+  '
+}
+
+stock_menu_restored() {
+  omarchy plugin list --json | jq -e '
+    any(.[]; .id == "omarchy.menu" and .enabled == true and .active == true)
+  '
+}
+
+cleanup() {
+  omarchy-shell shell hide omarchy.menu >/dev/null 2>&1 || true
+  if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' >/dev/null; then
+    omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+    omarchy plugin remove "$PLUGIN_ID" --yes >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+cleanup
+
+omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
+wait_until "kids plugin becomes the active Omarchy menu" 20 plugin_enabled
+[[ $(omarchy menu ping) == ok ]] || fail "kids menu answers stock menu IPC"
+pass "kids menu answers stock menu IPC"
+
+installed="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+omarchy plugin validate "$installed"
+pass "installed plugin passes Omarchy validation"
+
+omarchy menu summon root >/dev/null
+wait_until "kids root menu opens" 15 layer_present
+wait_until "kids root shows Apps" 15 screen_contains Apps
+wait_until "kids root shows Style" 15 screen_contains Style
+wait_until "kids root shows System" 15 screen_contains System
+screenshot success-kids-menu-root
+
+wtype -k Return
+wait_until "allowlisted Apps submenu shows Files" 15 screen_contains Files
+wait_until "allowlisted Apps submenu shows LibreOffice" 15 screen_contains LibreOffice
+screenshot success-kids-menu-apps
+wtype -k Escape
+wtype -k Escape
+wait_until "kids Apps menu closes" 15 layer_absent
+
+omarchy menu summon system >/dev/null
+wait_until "filtered System menu opens" 15 layer_present
+wait_until "filtered System menu shows Lock" 15 screen_contains Lock
+wait_until "filtered System menu shows Restart" 15 screen_contains Restart
+wait_until "filtered System menu shows Shut Down" 15 screen_contains "Shut Down"
+screenshot success-kids-menu-system
+wtype -k Escape
+wait_until "filtered System menu closes" 15 layer_absent
+
+if rg -q 'xdg-terminal-exec|provider[^\n]*apps|omarchy-(install|pkg|remove)' \
+  "$installed/BarWidget.qml" "$installed/kids-menu.jsonc"; then
+  fail "installed plugin retains an obvious menu bypass"
+fi
+pass "installed menu has no dynamic app provider, package actions, or menu-button terminal shortcut"
+
+omarchy plugin disable "$PLUGIN_ID"
+wait_until "disabling kids mode restores the stock menu" 20 stock_menu_restored
+
+omarchy menu summon root >/dev/null
+wait_until "restored stock menu opens" 15 layer_present
+wait_until "restored stock menu shows Learn" 15 screen_contains Learn
+wait_until "restored stock menu shows Setup" 15 screen_contains Setup
+screenshot success-stock-menu-restored
+wtype -k Escape
+wait_until "restored stock menu closes" 15 layer_absent
+
+trap - EXIT
+cleanup
+pass "Omarchy Kids menu VM acceptance passed"

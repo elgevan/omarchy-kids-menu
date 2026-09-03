@@ -32,3 +32,13 @@ An optional guardian-managed extension can be placed at `~/.config/omarchy-kids/
 ## Scope
 
 The plugin filters the Omarchy menu and removes the menu button's right-click terminal shortcut. It does not remove installed applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent the user from disabling the plugin.
+
+## Testing
+
+Run the static checks on an Omarchy host with:
+
+```bash
+./test/run
+```
+
+`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It installs this repository through `omarchy plugin add`, captures the filtered Apps and System menus, disables the plugin, and verifies that the stock menu returns.
