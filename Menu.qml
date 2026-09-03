@@ -4,7 +4,7 @@ import "Allowlist.js" as Allowlist
 import "KidsBrowser.js" as KidsBrowser
 
 // Reuse the menu implementation shipped by the running Omarchy installation,
-// but point it at this plugin's allowlisted data. This keeps the POC aligned
+// but point it at this plugin's allowlisted data. This keeps the plugin aligned
 // with the installed shell instead of vendoring a snapshot of Menu.qml.
 Loader {
   id: root
@@ -20,8 +20,8 @@ Loader {
     ? shell.serviceFor("io.github.elgevan.omarchy-kids")
     : null
   readonly property bool kidsModeEnabled: root.allowlistService
-    ? root.allowlistService.kidsModeEnabled !== false
-    : true
+    ? root.allowlistService.kidsModeEnabled === true
+    : false
 
   readonly property string pluginRoot: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir)

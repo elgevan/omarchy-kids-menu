@@ -13,8 +13,8 @@ BarWidget {
     : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool kidsModeEnabled: allowlistService
-    ? allowlistService.kidsModeEnabled !== false
-    : true
+    ? allowlistService.kidsModeEnabled === true
+    : false
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false

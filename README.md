@@ -1,6 +1,6 @@
 # Omarchy Kids Menu
 
-This proof-of-concept Omarchy plugin uses its own permanent plugin ID and does not use `omarchy.clonedFrom`. While enabled, its Omarchy-symbol button occupies the stock menu button's bar position and a separate manager remains on the right. Its own **Kids Mode** switch chooses between a filtered kids menu and the normal Omarchy menu. While Kids Mode is on, the root shows only selected installed applications plus Omarchy's Style menu when the style tools are available, and Omarchy's Do Not Disturb mode is enabled. It is a convenience filter, not a security boundary.
+Omarchy Kids Menu is a standalone plugin with its own permanent ID. Enabling it keeps the normal Omarchy menu symbol on the left and adds a Kids Mode manager on the right. A new installation starts inactive: choose the available apps, then explicitly start Kids Mode from the manager. While active, the menu shows only selected installed applications plus Omarchy's Style menu when its tools are available, and Do Not Disturb is enabled. This is a convenience filter, not a security boundary.
 
 The left button opens `io.github.elgevan.omarchy-kids` directly. Because a standalone plugin cannot redirect Omarchy's built-in `omarchy.menu` IPC route, Kids Mode temporarily disables that unrestricted menu. At the same time, a transient Hyprland shortcut layer redirects the normal Menu, Apps, Theme, Background, and browser shortcuts to filtered plugin routes. Stock shortcuts that would directly open hidden apps, adult settings, numbered bar panels, capture/share tools, reminders, notification controls, or other omitted surfaces are temporarily removed. Kids Mode also blocks close-all, laptop-display, monitor-scaling, and touchpad-toggle shortcuts so an accidental key combination cannot discard work or leave the desktop apparently broken. Everyday volume, brightness, media, clipboard, lock, and normal window-navigation controls remain available. Turning Kids Mode off restores the stock IPC route and reloads the user's unchanged Hyprland configuration. Disabling or removing the plugin performs the same restoration, restores the original stock menu bar entry, and removes the manager widget.
 
@@ -28,11 +28,11 @@ When Kids Mode first enables Do Not Disturb, it remembers the existing notificat
 
 ## Requirements
 
-The plugin targets Omarchy 4's Quattro shell and requires Chromium at `/usr/bin/chromium` for its isolated Kids browser and web-app launches. It otherwise uses commands already supplied by a normal Omarchy installation: `omarchy-shell`, `omarchy-menu-keybindings`, `omarchy-notification-send`, `uwsm-app`, `hyprctl`, `jq`, and `flock`. It has no install hook, requests no elevated privileges, never installs these dependencies itself, and never writes `~/.config/hypr`. Its shortcut changes exist only in the running Hyprland session and are rebuilt from the user's normal configuration on exit.
+The plugin targets Omarchy 4's Quattro shell and requires Chromium at `/usr/bin/chromium` for its isolated Kids browser and web-app launches. It otherwise uses commands supplied by a normal Omarchy installation: `omarchy-shell`, `omarchy-menu-keybindings`, `omarchy-notification-send`, `uwsm-app`, `hyprctl`, `jq`, and `flock`. It has no install hook, requests no elevated privileges, never installs these dependencies itself, and never writes `~/.config/hypr`. Its shortcut changes exist only in the running Hyprland session and are rebuilt from the user's normal configuration on exit.
 
 ## Install
 
-Publish or clone this directory as its own Git repository, then run:
+Run:
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
@@ -46,7 +46,7 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.elgevan.omarchy-kids
 ```
 
-For normal use, switch modes from the right-side Kids Mode manager. These commands control installation-level plugin activation and are retained for maintenance:
+Open the right-side Kids Mode manager to select apps and start Kids Mode. These commands control installation-level plugin activation:
 
 ```bash
 omarchy plugin disable io.github.elgevan.omarchy-kids
@@ -61,7 +61,7 @@ Remove the plugin through Omarchy's standard plugin lifecycle:
 omarchy plugin remove io.github.elgevan.omarchy-kids
 ```
 
-Omarchy disables the plugin before removing its checkout. During that disable step, the plugin restores the stock menu and bar layout, the normal shortcut set, hidden parent windows, and the notification preference that was active before Kids Mode. The saved allowlist, mode preference, and Kids Chromium profile remain in the user's home directory so they are available after a reinstall.
+Omarchy disables the plugin before removing its checkout. The plugin stages its two cleanup helpers in the user runtime directory so that disable can restore the stock menu and bar layout, normal shortcuts, hidden parent windows, and the previous notification preference even when removal immediately deletes the checkout. The saved allowlist, mode preference, and Kids Chromium profile remain available after a reinstall.
 
 ## Scope
 
@@ -75,4 +75,4 @@ Run the static checks on an Omarchy host with:
 ./test/run
 ```
 
-`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It verifies presence-sensitive defaults, transient shortcut filtering and restoration, notification suppression and restoration, adds an installed app through the persisted allowlist, checks that stock menu IPC is blocked only during Kids Mode, confirms the package set is unchanged, and verifies installation-level disable/restore. Set `OMARCHY_KIDS_TEST_PASSWORD` only in a disposable guest to add the wrong-password, valid-password, internal Off, normal-menu, and immediate-On checks.
+`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It verifies inactive first-run behavior, explicit activation, filtering and restoration, browser isolation, unchanged packages, and direct removal while Kids Mode is active. Set `OMARCHY_KIDS_TEST_PASSWORD` only in a disposable guest to add wrong-password and valid-password checks.

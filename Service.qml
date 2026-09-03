@@ -18,8 +18,9 @@ Item {
   property string omarchyPath: ""
   property var allowedDesktopIds: Allowlist.defaultIds()
   property bool directoryReady: false
+  property bool runtimeToolsReady: false
   property bool writePending: false
-  property bool kidsModeEnabled: true
+  property bool kidsModeEnabled: false
   property bool modeStateLoaded: false
   property bool modeWritePending: false
   property bool notificationStateLoaded: false
@@ -30,7 +31,7 @@ Item {
   property int hiddenWindowCount: 0
   property bool windowSessionBusy: false
   property string windowSessionError: ""
-  property bool windowSessionDesired: true
+  property bool windowSessionDesired: false
   property int windowGuardAttemptsRemaining: 0
   property var stockMenuRestore: null
   property bool shellIntegrationReady: false
@@ -47,6 +48,8 @@ Item {
   readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
   readonly property string stateDir: stateRoot + "/omarchy-kids"
   readonly property string notificationStatePath: stateDir + "/notifications.json"
+  readonly property string runtimeRoot: Quickshell.env("XDG_RUNTIME_DIR") || stateRoot
+  readonly property string runtimeToolDir: runtimeRoot + "/omarchy-kids/tools"
   readonly property var defaultDesktopIds: Allowlist.defaultIds()
   readonly property var notificationService: root.shell && typeof root.shell.serviceFor === "function"
     ? root.shell.serviceFor("omarchy.notifications")
@@ -62,15 +65,36 @@ Item {
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
     : ""
-  readonly property string windowSessionTool: manifest && manifest.__sourceDir
+  readonly property string sourceWindowSessionTool: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/window-session"
     : ""
-  readonly property string shortcutPolicyTool: manifest && manifest.__sourceDir
+  readonly property string sourceShortcutPolicyTool: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/shortcut-policy"
+    : ""
+  readonly property string windowSessionTool: runtimeToolsReady
+    ? runtimeToolDir + "/window-session"
+    : ""
+  readonly property string shortcutPolicyTool: runtimeToolsReady
+    ? runtimeToolDir + "/shortcut-policy"
     : ""
 
   signal allowlistChanged()
   signal kidsModeChanged()
+
+  function prepareRuntimeTools() {
+    if (!root.directoryReady || !root.sourceWindowSessionTool
+        || !root.sourceShortcutPolicyTool || stageRuntimeTools.running)
+      return
+
+    root.runtimeToolsReady = false
+    stageRuntimeTools.command = [
+      "cp", "--",
+      root.sourceWindowSessionTool,
+      root.sourceShortcutPolicyTool,
+      root.runtimeToolDir
+    ]
+    stageRuntimeTools.running = true
+  }
 
   function sameIds(left, right) {
     var a = Allowlist.normalizeIds(left)
@@ -428,13 +452,29 @@ Item {
 
   Process {
     id: ensureDirectory
-    command: ["mkdir", "-p", root.configDir, root.stateDir]
+    command: ["mkdir", "-p", root.configDir, root.stateDir, root.runtimeToolDir]
     onExited: function(exitCode) {
       root.directoryReady = exitCode === 0
       if (root.directoryReady) {
         root.flushWrite()
         root.flushModeWrite()
         root.scheduleNotificationSetup()
+        root.prepareRuntimeTools()
+      }
+    }
+  }
+
+  Process {
+    id: stageRuntimeTools
+    command: []
+    onExited: function(exitCode) {
+      root.runtimeToolsReady = exitCode === 0
+      if (root.runtimeToolsReady) {
+        root.scheduleWindowSessionSync()
+        root.scheduleShortcutPolicySync()
+      } else {
+        root.windowSessionError = "Could not prepare runtime helpers"
+        root.shortcutPolicyError = "Could not prepare runtime helpers"
       }
     }
   }
@@ -543,8 +583,7 @@ Item {
   }
   onManifestChanged: {
     root.scheduleShellIntegration()
-    root.scheduleWindowSessionSync()
-    root.scheduleShortcutPolicySync()
+    root.prepareRuntimeTools()
   }
   onNotificationServiceChanged: root.scheduleNotificationSetup()
 

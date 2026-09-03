@@ -1,6 +1,6 @@
 function parseEnabled(rawText) {
   var text = String(rawText || "").trim()
-  if (!text) return true
+  if (!text) return false
 
   try {
     var parsed = JSON.parse(text)
@@ -9,13 +9,13 @@ function parseEnabled(rawText) {
   } catch (error) {
   }
 
-  return true
+  return false
 }
 
 function stateText(enabled) {
   return JSON.stringify({
     version: 1,
-    enabled: enabled !== false
+    enabled: enabled === true
   }, null, 2) + "\n"
 }
 

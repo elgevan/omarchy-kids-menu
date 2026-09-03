@@ -27,7 +27,7 @@ rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.13.3" and
+  .version == "0.14.0" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -87,11 +87,13 @@ node - "$PLUGIN_ROOT/ModeState.js" <<'NODE'
 const assert = require("node:assert/strict")
 const state = require(process.argv[2])
 
-assert.equal(state.parseEnabled(""), true)
-assert.equal(state.parseEnabled("not json"), true)
+assert.equal(state.parseEnabled(""), false)
+assert.equal(state.parseEnabled("not json"), false)
 assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: false})), false)
+assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: true})), true)
 assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
+assert.deepEqual(JSON.parse(state.stateText()), {version: 1, enabled: false})
 NODE
 
 node - "$PLUGIN_ROOT/ShellIntegration.js" <<'NODE'
@@ -223,6 +225,12 @@ NODE
 
 [[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
 [[ -x $SHORTCUT_POLICY ]] || fail "shortcut-policy helper is not executable"
+rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q '"cp", "--"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'id: stageRuntimeTools' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'windowSessionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  || fail "cleanup helpers are not staged outside the removable plugin checkout"
 window_test_dir=$(mktemp -d)
 window_status=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
