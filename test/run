@@ -147,7 +147,9 @@ rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml"
   && rg -q 'serviceFor\("omarchy\.lock"\)' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'root\.lockService\.beginLock\(\)' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'setKidsModeEnabled\(false\)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'text: root\.service && root\.service\.kidsModeEnabled \? "ON" : "OFF"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q '\? "ACTIVE" : "INACTIVE"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q '"EXIT KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q '"START KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
   || fail "the persistent Kids Mode toggle is not protected by Omarchy authentication"
 
 if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' \

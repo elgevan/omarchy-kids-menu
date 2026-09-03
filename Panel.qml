@@ -178,7 +178,7 @@ Panel {
         spacing: Style.space(10)
 
         Column {
-          width: parent.width - modeToggle.width - parent.spacing
+          width: parent.width - modeStatus.width - parent.spacing
           spacing: Style.space(2)
 
           Text {
@@ -196,8 +196,8 @@ Panel {
             text: root.authError.length > 0
               ? root.authError
               : root.service && root.service.kidsModeEnabled
-                ? root.installedAllowedCount + " apps shown • notifications muted"
-                : root.installedAllowedCount + " apps ready • normal menu active"
+                ? root.installedAllowedCount + " apps available • notifications muted"
+                : "Normal Omarchy menu active • notifications restored"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -205,16 +205,14 @@ Panel {
         }
 
         BorderSurface {
-          id: modeToggle
+          id: modeStatus
           anchors.verticalCenter: parent.verticalCenter
-          implicitWidth: modeToggleText.implicitWidth + Style.space(20)
-          implicitHeight: modeToggleText.implicitHeight + Style.space(11)
+          implicitWidth: modeStatusText.implicitWidth + Style.space(20)
+          implicitHeight: modeStatusText.implicitHeight + Style.space(11)
           radius: height / 2
           color: root.service && root.service.kidsModeEnabled
             ? Style.selectedFillFor(root.accent, root.accent)
-            : modeToggleMouse.containsMouse
-              ? Style.hoverFillFor(root.accent, root.accent)
-              : Style.normalFillFor(root.foreground, root.accent)
+            : Style.normalFillFor(root.foreground, root.accent)
           borderSpec: Border.controlSpec(
             root.service && root.service.kidsModeEnabled ? "selected" : "normal",
             root.service && root.service.kidsModeEnabled ? root.accent : root.foreground,
@@ -222,22 +220,84 @@ Panel {
           )
 
           Text {
-            id: modeToggleText
+            id: modeStatusText
             anchors.centerIn: parent
-            text: root.service && root.service.kidsModeEnabled ? "ON" : "OFF"
+            text: root.service && root.service.kidsModeEnabled ? "ACTIVE" : "INACTIVE"
             color: root.service && root.service.kidsModeEnabled ? root.accent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
           }
+        }
+      }
 
-          MouseArea {
-            id: modeToggleMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleKidsMode()
+      BorderSurface {
+        id: modeAction
+        width: parent.width
+        height: Style.space(50)
+        radius: Style.cornerRadius
+        color: root.service && !root.service.kidsModeEnabled
+          ? Style.selectedFillFor(root.accent, root.accent)
+          : modeActionMouse.containsMouse
+            ? Style.hoverFillFor(root.accent, root.accent)
+            : Style.normalFillFor(root.foreground, root.accent)
+        borderSpec: Border.controlSpec(
+          root.service && !root.service.kidsModeEnabled ? "selected" : "normal",
+          root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground,
+          root.accent
+        )
+        opacity: root.service && root.service.modeStateLoaded ? 1 : 0.55
+
+        Column {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(14)
+          anchors.right: modeActionArrow.left
+          anchors.rightMargin: Style.space(12)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+
+          Text {
+            width: parent.width
+            text: root.service && root.service.kidsModeEnabled
+              ? "EXIT KIDS MODE"
+              : "START KIDS MODE"
+            color: root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
           }
+
+          Text {
+            width: parent.width
+            text: root.service && root.service.kidsModeEnabled
+              ? "Requires password or fingerprint"
+              : "Apply the app filter and mute notifications"
+            color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        Text {
+          id: modeActionArrow
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(16)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "›"
+          color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.heading
+          font.bold: true
+        }
+
+        MouseArea {
+          id: modeActionMouse
+          anchors.fill: parent
+          enabled: root.service && root.service.modeStateLoaded
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.toggleKidsMode()
         }
       }
 
@@ -376,7 +436,7 @@ Panel {
 
       Item {
         width: parent.width
-        height: Style.space(440)
+        height: Style.space(400)
 
         Text {
           visible: appModel.count === 0
@@ -491,9 +551,7 @@ Panel {
         Text {
           width: parent.width - resetButton.width - parent.spacing
           anchors.verticalCenter: parent.verticalCenter
-          text: root.service && root.service.kidsModeEnabled
-            ? "Password or fingerprint is required to turn Kids Mode off."
-            : "Turn Kids Mode on to apply this app filter."
+          text: "App selections are saved automatically across reboots."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
