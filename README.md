@@ -1,8 +1,10 @@
 # Omarchy Kids Menu
 
-This proof-of-concept Omarchy plugin replaces the stock `omarchy.menu` while enabled. It presents only a static allowlist of applications, two appearance controls, and essential session and power actions. It is a convenience filter, not a security boundary.
+This proof-of-concept Omarchy plugin replaces the stock `omarchy.menu` while enabled. It elevates a static allowlist of applications directly into the root menu alongside Style and System. It is a convenience filter, not a security boundary.
 
 The plugin uses Omarchy's `omarchy.clonedFrom` contract, so existing menu keybindings and IPC calls continue targeting `omarchy.menu`. Disabling the plugin restores the stock menu automatically.
+
+There is no visible Apps submenu. A hidden compatibility route makes Omarchy's stock Apps-menu shortcut (`Super+Alt+Space`) open the flattened root menu.
 
 ## Install
 
@@ -41,4 +43,4 @@ Run the static checks on an Omarchy host with:
 ./test/run
 ```
 
-`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It installs this repository through `omarchy plugin add`, captures the filtered Apps and System menus, disables the plugin, and verifies that the stock menu returns.
+`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It installs this repository through `omarchy plugin add`, captures the flattened root and filtered System menus, checks the legacy Apps route, disables the plugin, and verifies that the stock menu returns.
