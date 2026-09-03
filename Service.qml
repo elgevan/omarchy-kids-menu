@@ -34,6 +34,11 @@ Item {
   property int windowGuardAttemptsRemaining: 0
   property var stockMenuRestore: null
   property bool shellIntegrationReady: false
+  property bool shortcutPolicyApplied: false
+  property bool shortcutPolicyBusy: false
+  property string shortcutPolicyError: ""
+  property string shortcutPolicyDesiredSignature: ""
+  property string shortcutPolicyRunningSignature: ""
 
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
@@ -59,6 +64,9 @@ Item {
   readonly property string windowSessionTool: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/window-session"
     : ""
+  readonly property string shortcutPolicyTool: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) + "/shortcut-policy"
+    : ""
 
   signal allowlistChanged()
   signal kidsModeChanged()
@@ -75,7 +83,10 @@ Item {
     var normalized = Allowlist.normalizeIds(values)
     var changed = !root.sameIds(root.allowedDesktopIds, normalized)
     root.allowedDesktopIds = normalized
-    if (changed) root.allowlistChanged()
+    if (changed) {
+      root.allowlistChanged()
+      root.scheduleShortcutPolicySync()
+    }
     if (persist) root.persist()
   }
 
@@ -136,6 +147,7 @@ Item {
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
     root.scheduleShellIntegration()
+    root.scheduleShortcutPolicySync()
   }
 
   function setKidsModeEnabled(enabled) {
@@ -147,6 +159,7 @@ Item {
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
     root.scheduleShellIntegration()
+    root.scheduleShortcutPolicySync()
   }
 
   function persistModeState() {
@@ -275,6 +288,69 @@ Item {
     windowGuardTimer.restart()
   }
 
+  function shortcutAllowed(ids) {
+    for (var i = 0; i < ids.length; i++) {
+      if (root.isAllowed(ids[i])) return true
+    }
+    return false
+  }
+
+  function shortcutPolicySignature() {
+    if (!root.kidsModeEnabled) return "off"
+    return "on:"
+      + (root.shortcutAllowed(["chromium", "google-chrome", "google-chrome-stable"]) ? "1" : "0")
+      + (root.isAllowed("omawrite") ? "1" : "0")
+      + (root.isAllowed("omacalc") ? "1" : "0")
+  }
+
+  function scheduleShortcutPolicySync() {
+    if (!root.modeStateLoaded || !root.shortcutPolicyTool) return
+    root.shortcutPolicyDesiredSignature = root.shortcutPolicySignature()
+    shortcutPolicySync.restart()
+  }
+
+  function syncShortcutPolicy() {
+    if (!root.modeStateLoaded || !root.shortcutPolicyTool || root.shortcutPolicyBusy)
+      return
+
+    root.shortcutPolicyBusy = true
+    root.shortcutPolicyError = ""
+    root.shortcutPolicyRunningSignature = root.shortcutPolicyDesiredSignature
+
+    if (root.shortcutPolicyRunningSignature === "off") {
+      shortcutPolicyExit.running = true
+      return
+    }
+
+    var signature = root.shortcutPolicyRunningSignature
+    shortcutPolicyEnter.command = [
+      root.shortcutPolicyTool,
+      "enter",
+      signature.charAt(3) === "1" ? "true" : "false",
+      signature.charAt(4) === "1" ? "true" : "false",
+      signature.charAt(5) === "1" ? "true" : "false"
+    ]
+    shortcutPolicyEnter.running = true
+  }
+
+  function finishShortcutPolicy(action, exitCode, output) {
+    var result = root.parseWindowSessionOutput(output)
+    root.shortcutPolicyBusy = false
+
+    if (exitCode !== 0 || !result) {
+      root.shortcutPolicyError = action === "enter"
+        ? "Could not filter keyboard shortcuts"
+        : "Could not restore keyboard shortcuts"
+      root.shortcutPolicyApplied = action === "exit"
+    } else {
+      root.shortcutPolicyApplied = action === "enter" && result.applied === true
+      if (result.error) root.shortcutPolicyError = String(result.error)
+    }
+
+    if (root.shortcutPolicyRunningSignature !== root.shortcutPolicyDesiredSignature)
+      shortcutPolicySync.restart()
+  }
+
   function scheduleShellIntegration() {
     shellIntegrationSetup.restart()
   }
@@ -396,6 +472,24 @@ Item {
     }
   }
 
+  Process {
+    id: shortcutPolicyEnter
+    command: []
+    stdout: StdioCollector { id: shortcutPolicyEnterOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishShortcutPolicy("enter", exitCode, shortcutPolicyEnterOutput.text)
+    }
+  }
+
+  Process {
+    id: shortcutPolicyExit
+    command: root.shortcutPolicyTool ? [root.shortcutPolicyTool, "exit"] : []
+    stdout: StdioCollector { id: shortcutPolicyExitOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishShortcutPolicy("exit", exitCode, shortcutPolicyExitOutput.text)
+    }
+  }
+
   Timer {
     id: notificationSetup
     interval: 100
@@ -424,6 +518,12 @@ Item {
   }
 
   Timer {
+    id: shortcutPolicySync
+    interval: 100
+    onTriggered: root.syncShortcutPolicy()
+  }
+
+  Timer {
     id: windowGuardTimer
     interval: 650
     onTriggered: {
@@ -438,6 +538,7 @@ Item {
   onManifestChanged: {
     root.scheduleShellIntegration()
     root.scheduleWindowSessionSync()
+    root.scheduleShortcutPolicySync()
   }
   onNotificationServiceChanged: root.scheduleNotificationSetup()
 
@@ -446,6 +547,7 @@ Item {
     root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
+    root.scheduleShortcutPolicySync()
   }
 
   Component.onDestruction: {
@@ -454,6 +556,8 @@ Item {
       root.releaseShellIntegration()
       if (root.windowSessionTool)
         Quickshell.execDetached([root.windowSessionTool, "exit"])
+      if (root.shortcutPolicyTool)
+        Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
     }
   }
 }

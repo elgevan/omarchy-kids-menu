@@ -7,8 +7,9 @@ MANIFEST="$PLUGIN_ROOT/manifest.json"
 MENU="$PLUGIN_ROOT/kids-menu.jsonc"
 EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
 WINDOW_SESSION="$PLUGIN_ROOT/window-session"
+SHORTCUT_POLICY="$PLUGIN_ROOT/shortcut-policy"
 
-bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" "$WINDOW_SESSION"
+bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" "$WINDOW_SESSION" "$SHORTCUT_POLICY"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -20,7 +21,7 @@ fail() {
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.10.0" and
+  .version == "0.11.0" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -215,6 +216,7 @@ assert.deepEqual(browser.launchCommand("/home/kid", "https://youtube.com/"), [
 NODE
 
 [[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
+[[ -x $SHORTCUT_POLICY ]] || fail "shortcut-policy helper is not executable"
 window_test_dir=$(mktemp -d)
 window_status=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
@@ -225,6 +227,65 @@ rm -rf -- "$window_test_dir"
 jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper does not report a clean inactive state"
+
+shortcut_test_dir=$(mktemp -d)
+shortcut_log=$shortcut_test_dir/hyprctl.log
+shortcut_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.json
+shortcut_mock=$PLUGIN_ROOT/test/hyprctl-mock
+
+shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter true true true
+)
+jq -e '.action == "enter" and .applied == true and .changed > 0' \
+  <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy does not report a successful transient layer"
+rg -Fq 'hl.unbind("SUPER + SPACE")' "$shortcut_log" \
+  && rg -Fq 'Kids Mode: Menu' "$shortcut_log" \
+  && rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
+  && rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \
+  && rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + RETURN")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + CTRL + C")' "$shortcut_log" \
+  || fail "shortcut policy does not redirect menus/browser and block stock bypasses"
+if rg -Fq 'hl.unbind("SUPER + SHIFT + F")' "$shortcut_log"; then
+  fail "shortcut policy replaces a customized binding"
+fi
+
+: > "$shortcut_log"
+shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter false false false
+)
+jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy cannot rebuild itself after a shell reload"
+[[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
+  || fail "shortcut policy does not restore configuration before rebuilding its layer"
+rg -Fq 'hl.unbind("SUPER + SHIFT + W")' "$shortcut_log" \
+  && rg -Fq 'hl.unbind("SUPER + CTRL + Q")' "$shortcut_log" \
+  && ! rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
+  || fail "shortcut policy does not follow the current default-app selection"
+
+: > "$shortcut_log"
+shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" exit
+)
+jq -e '.action == "exit" and .applied == false and .restored == true' \
+  <<< "$shortcut_result" >/dev/null \
+  && [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
+  && [[ ! -e $shortcut_test_dir/runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy does not restore Hyprland state on exit"
+rm -rf -- "$shortcut_test_dir"
 
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
@@ -296,6 +357,17 @@ rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml"
   && rg -q '"EXIT KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q '"START KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
   || fail "the persistent Kids Mode toggle is not protected by Omarchy authentication"
+
+rg -q 'shortcutPolicyTool' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q '"/shortcut-policy"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'scheduleShortcutPolicySync' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'Quickshell\.execDetached\(\[root\.shortcutPolicyTool, "exit"\]\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'function launchKidsBrowser' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'function launchAllowedApp' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'function shortcutStatus' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'hyprctl' "$SHORTCUT_POLICY" \
+  && ! rg -q '\.config/hypr|bindings\.lua' "$SHORTCUT_POLICY" \
+  || fail "Kids Mode shortcuts are not transient, reversible, and browser-isolated"
 
 if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' \
   "$PLUGIN_ROOT/Panel.qml" "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then

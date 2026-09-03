@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+case ${1:-} in
+  binds)
+    [[ ${2:-} == -j ]]
+    cat "$OMARCHY_KIDS_TEST_BINDS"
+    ;;
+  eval)
+    printf 'eval\n%s\n' "${2:-}" >>"$OMARCHY_KIDS_TEST_LOG"
+    echo ok
+    ;;
+  reload)
+    echo reload >>"$OMARCHY_KIDS_TEST_LOG"
+    echo ok
+    ;;
+  configerrors)
+    ;;
+  *)
+    echo "unexpected hyprctl mock call: $*" >&2
+    exit 1
+    ;;
+esac

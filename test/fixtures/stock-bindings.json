@@ -1,0 +1,15 @@
+[
+  {"modmask":64,"key":"SPACE","submap":"","description":"Omarchy menu"},
+  {"modmask":72,"key":"SPACE","submap":"","description":"Apps menu"},
+  {"modmask":68,"key":"SPACE","submap":"","description":"Background switcher"},
+  {"modmask":69,"key":"SPACE","submap":"","description":"Theme menu"},
+  {"modmask":68,"key":"C","submap":"","description":"Capture menu"},
+  {"modmask":64,"key":"RETURN","submap":"","description":"Terminal"},
+  {"modmask":65,"key":"RETURN","submap":"","description":"Browser"},
+  {"modmask":65,"key":"B","submap":"","description":"Browser"},
+  {"modmask":73,"key":"B","submap":"","description":"Browser (private)"},
+  {"modmask":65,"key":"F","submap":"","description":"My file manager"},
+  {"modmask":65,"key":"W","submap":"","description":"Omawrite"},
+  {"modmask":68,"key":"Q","submap":"","description":"Calculator"},
+  {"modmask":0,"key":"XF86Calculator","submap":"","description":"Calculator"}
+]

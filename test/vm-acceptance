@@ -13,6 +13,7 @@ MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
 NOTIFICATION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/notifications.json"
 KIDS_BROWSER_PROFILE="$HOME/.local/share/omarchy-kids/chromium"
 MANAGER_ID=$PLUGIN_ID.manager
+SHORTCUT_MARKER="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-kids/shortcut-policy.active"
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -137,6 +138,16 @@ lock_is() {
   [[ $(omarchy-shell lock isLocked 2>/dev/null) == "$1" ]]
 }
 
+binding_description_present() {
+  local description=$1
+  hyprctl binds -j | jq -e --arg description "$description" \
+    'any(.[]; .description == $description)'
+}
+
+binding_description_absent() {
+  ! binding_description_present "$1"
+}
+
 youtube_window_with_kids_profile() {
   local pid command
   while read -r pid; do
@@ -190,6 +201,24 @@ wait_until "separate Kids manager appears on the right" 20 manager_on_right
 wait_until "Kids Mode defaults to on" 20 mode_is on
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
+wait_until "Kids Mode redirects the normal menu shortcut" 20 \
+  binding_description_present "Kids Mode: Menu"
+wait_until "Kids Mode redirects the Apps shortcut" 20 \
+  binding_description_present "Kids Mode: Apps"
+wait_until "Kids Mode redirects browser shortcuts" 20 \
+  binding_description_present "Kids Mode: Browser"
+wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
+  binding_description_absent "Terminal"
+wait_until "Kids Mode blocks the DND bypass shortcut" 20 \
+  binding_description_absent "Toggle silencing notifications"
+binding_description_present "Kids Mode: Omawrite" \
+  || fail "selected Omawrite shortcut is not guarded"
+pass "selected Omawrite shortcut is guarded"
+binding_description_present "Kids Mode: Calculator" \
+  || fail "selected Omacalc shortcut is not guarded"
+pass "selected Omacalc shortcut is guarded"
+[[ -f $SHORTCUT_MARKER ]] || fail "transient shortcut ownership marker is missing"
+pass "transient shortcut ownership is recorded"
 [[ $(omarchy-shell shell call "$PLUGIN_ID" ping '{}') == ok ]] \
   || fail "kids menu answers its standalone IPC"
 pass "kids menu answers its standalone IPC"
@@ -291,6 +320,12 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "valid authentication turns Kids Mode off" 20 mode_is off
   wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
   wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
+  wait_until "internal Off restores the stock menu shortcut" 20 \
+    binding_description_present "Omarchy menu"
+  wait_until "internal Off restores the terminal shortcut" 20 \
+    binding_description_present "Terminal"
+  wait_until "internal Off removes the transient shortcut layer" 20 \
+    binding_description_absent "Kids Mode: Menu"
   manager_on_right || fail "Kids Mode manager remains available while off"
   pass "Kids Mode manager remains available while off"
 
@@ -314,6 +349,8 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "turning Kids Mode on is immediate" 15 mode_is on
   wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
   wait_until "turning Kids Mode on blocks stock menu IPC again" 15 stock_menu_blocked
+  wait_until "turning Kids Mode on reapplies shortcut filtering" 15 \
+    binding_description_present "Kids Mode: Menu"
   lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
   pass "turning Kids Mode on does not request authentication"
   omarchy-shell "$MANAGER_ID" hide
@@ -329,6 +366,15 @@ omarchy plugin disable "$PLUGIN_ID"
 wait_until "disabling kids mode restores the stock menu" 20 stock_menu_restored
 wait_until "disabling kids mode removes the right manager widget" 20 manager_absent
 wait_until "disabling kids mode restores the prior DND state" 20 dnd_is "$dnd_before"
+wait_until "disabling kids mode restores stock shortcuts" 20 \
+  binding_description_present "Omarchy menu"
+wait_until "disabling kids mode restores direct app shortcuts" 20 \
+  binding_description_present "Terminal"
+wait_until "disabling kids mode removes Kids shortcut bindings" 20 \
+  binding_description_absent "Kids Mode: Menu"
+[[ ! -e $SHORTCUT_MARKER ]] || fail "shortcut marker remains after plugin disable"
+[[ -z $(hyprctl configerrors) ]] || fail "Hyprland reports configuration errors after shortcut restore"
+pass "Hyprland shortcut restore is clean"
 
 omarchy menu summon root >/dev/null
 wait_until "restored stock menu opens" 15 layer_present

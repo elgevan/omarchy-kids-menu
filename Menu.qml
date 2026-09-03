@@ -144,6 +144,35 @@ Loader {
       root.allowlistService.guardAppLaunch()
   }
 
+  function launchKidsBrowser() {
+    if (!root.kidsModeEnabled) return "inactive"
+    Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, ""))
+    root.guardAppLaunch()
+    return "ok"
+  }
+
+  function launchAllowedApp(payloadJson) {
+    if (!root.kidsModeEnabled || !root.allowlistService) return "inactive"
+
+    var payload = ({})
+    try { payload = JSON.parse(payloadJson || "{}") } catch (error) { return "invalid" }
+    var desktopId = KidsBrowser.normalizeDesktopId(payload.desktopId)
+    if (!desktopId || !root.allowlistService.isAllowed(desktopId)) return "blocked"
+
+    filteredAppLibrary.launch(desktopId, String(payload.name || desktopId))
+    return "ok"
+  }
+
+  function shortcutStatus() {
+    if (!root.allowlistService) return "unavailable"
+    return JSON.stringify({
+      applied: root.allowlistService.shortcutPolicyApplied === true,
+      busy: root.allowlistService.shortcutPolicyBusy === true,
+      error: String(root.allowlistService.shortcutPolicyError || ""),
+      desired: String(root.allowlistService.shortcutPolicyDesiredSignature || "")
+    })
+  }
+
   function configureMenu() {
     if (!item) return
 

@@ -1,0 +1,285 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+PLUGIN_ID=io.github.elgevan.omarchy-kids
+HYPRCTL_BIN=${OMARCHY_KIDS_HYPRCTL:-hyprctl}
+RUNTIME_ROOT=${XDG_RUNTIME_DIR:-/tmp/omarchy-kids-runtime-$UID}
+STATE_DIR=$RUNTIME_ROOT/omarchy-kids
+ACTIVE_MARKER=$STATE_DIR/shortcut-policy.active
+LOCK_FILE=$STATE_DIR/shortcut-policy.lock
+
+usage() {
+  echo "Usage: shortcut-policy enter <browser-allowed> <omawrite-allowed> <omacalc-allowed> | exit | status" >&2
+  exit 2
+}
+
+json_result() {
+  local action=$1 applied=$2 changed=$3 skipped=$4 restored=$5 error=${6:-}
+  jq -nc \
+    --arg action "$action" \
+    --argjson applied "$applied" \
+    --argjson changed "$changed" \
+    --argjson skipped "$skipped" \
+    --argjson restored "$restored" \
+    --arg error "$error" \
+    '{version: 1, action: $action, applied: $applied, changed: $changed,
+      skippedCustom: $skipped, restored: $restored}
+      + (if $error == "" then {} else {error: $error} end)'
+}
+
+reload_bindings() {
+  local output
+  if ! output=$($HYPRCTL_BIN reload 2>&1); then
+    printf '%s' "$output"
+    return 1
+  fi
+}
+
+is_boolean() {
+  [[ $1 == true || $1 == false ]]
+}
+
+mkdir -p -- "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+exec 9>"$LOCK_FILE"
+flock 9
+
+action=${1:-}
+case $action in
+  status)
+    if [[ -f $ACTIVE_MARKER ]]; then
+      json_result status true 0 0 false
+    else
+      json_result status false 0 0 false
+    fi
+    exit 0
+    ;;
+  exit)
+    if [[ ! -f $ACTIVE_MARKER ]]; then
+      json_result exit false 0 0 false
+      exit 0
+    fi
+
+    if error=$(reload_bindings); then
+      rm -f -- "$ACTIVE_MARKER"
+      json_result exit false 0 0 true
+      exit 0
+    fi
+
+    json_result exit true 0 0 false "Could not restore Hyprland bindings: $error"
+    exit 1
+    ;;
+  enter)
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+browser_allowed=${2:-}
+omawrite_allowed=${3:-}
+omacalc_allowed=${4:-}
+is_boolean "$browser_allowed" || usage
+is_boolean "$omawrite_allowed" || usage
+is_boolean "$omacalc_allowed" || usage
+
+# A shell/plugin reload can construct this service again without first disabling
+# it. Start from the user's real configuration before rebuilding our transient
+# layer so a previous instance never accumulates duplicate bindings.
+if [[ -f $ACTIVE_MARKER ]]; then
+  if ! error=$(reload_bindings); then
+    json_result enter false 0 0 false "Could not reset the previous shortcut layer: $error"
+    exit 1
+  fi
+  rm -f -- "$ACTIVE_MARKER"
+fi
+
+if ! bindings_json=$($HYPRCTL_BIN binds -j 2>&1); then
+  json_result enter false 0 0 false "Could not inspect Hyprland bindings: $bindings_json"
+  exit 1
+fi
+
+if ! jq -e 'type == "array"' <<<"$bindings_json" >/dev/null 2>&1; then
+  json_result enter false 0 0 false "Hyprland returned invalid binding data"
+  exit 1
+fi
+
+lua_program=""
+changed=0
+skipped=0
+
+append_lua() {
+  printf -v lua_program '%s%s\n' "$lua_program" "$1"
+}
+
+binding_is_unmodified_stock() {
+  local modmask=$1 key=$2 description=$3
+  jq -e \
+    --argjson modmask "$modmask" \
+    --arg key "${key,,}" \
+    --arg description "$description" '
+      [.[]
+        | select(.modmask == $modmask)
+        | select(((.key // "") | ascii_downcase) == $key)
+        | select((.submap // "") == "")
+      ] as $matches
+      | ($matches | length) == 1
+        and $matches[0].description == $description
+    ' <<<"$bindings_json" >/dev/null
+}
+
+consider_binding() {
+  local keys=$1 modmask=$2 json_key=$3 description=$4 replacement=${5:-}
+
+  if ! binding_is_unmodified_stock "$modmask" "$json_key" "$description"; then
+    ((skipped += 1))
+    return
+  fi
+
+  append_lua "hl.unbind(\"$keys\")"
+  ((changed += 1))
+
+  case $replacement in
+    menu-root)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"root\"}']]), { description = \"Kids Mode: Menu\" })"
+      ;;
+    menu-apps)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"apps\"}']]), { description = \"Kids Mode: Apps\" })"
+      ;;
+    style-background)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.background\"}']]), { description = \"Kids Mode: Background\" })"
+      ;;
+    style-theme)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.theme\"}']]), { description = \"Kids Mode: Theme\" })"
+      ;;
+    browser)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchKidsBrowser '{}']]), { description = \"Kids Mode: Browser\" })"
+      ;;
+    omawrite)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omawrite\",\"name\":\"Omawrite\"}']]), { description = \"Kids Mode: Omawrite\" })"
+      ;;
+    omacalc)
+      append_lua "hl.bind(\"$keys\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Mode: Calculator\" })"
+      ;;
+    "")
+      ;;
+    *)
+      json_result enter false "$changed" "$skipped" false "Unknown shortcut replacement: $replacement"
+      exit 1
+      ;;
+  esac
+}
+
+# Keep the normal Omarchy entry points useful, but route them to filtered
+# plugin-owned surfaces instead of the disabled stock menu.
+consider_binding "SUPER + SPACE" 64 SPACE "Omarchy menu" menu-root
+consider_binding "SUPER + ALT + SPACE" 72 SPACE "Apps menu" menu-apps
+consider_binding "SUPER + CTRL + SPACE" 68 SPACE "Background switcher" style-background
+consider_binding "SUPER + SHIFT + CTRL + SPACE" 69 SPACE "Theme menu" style-theme
+
+# Stock routes that expose sections intentionally absent from Kids Mode.
+consider_binding "SUPER + CTRL + E" 68 E "Emojis"
+consider_binding "SUPER + CTRL + C" 68 C "Capture menu"
+consider_binding "SUPER + CTRL + O" 68 O "Toggle menu"
+consider_binding "SUPER + CTRL + H" 68 H "Hardware menu"
+consider_binding "SUPER + ESCAPE" 64 ESCAPE "System menu"
+consider_binding "XF86PowerOff" 0 XF86PowerOff "Power menu"
+consider_binding "SUPER + K" 64 K "Keybindings"
+consider_binding "SUPER + ALT + K" 72 K "Tmux keybindings"
+consider_binding "SUPER + CTRL + K" 68 K "Herdr keybindings"
+consider_binding "SUPER + SHIFT + SPACE" 65 SPACE "Toggle top bar"
+
+# Browser bindings always use the persistent, login-free Kids Chromium profile.
+if [[ $browser_allowed == true ]]; then
+  consider_binding "SUPER + SHIFT + RETURN" 65 RETURN "Browser" browser
+  consider_binding "SUPER + SHIFT + B" 65 B "Browser" browser
+  consider_binding "SUPER + SHIFT + ALT + B" 73 B "Browser (private)" browser
+else
+  consider_binding "SUPER + SHIFT + RETURN" 65 RETURN "Browser"
+  consider_binding "SUPER + SHIFT + B" 65 B "Browser"
+  consider_binding "SUPER + SHIFT + ALT + B" 73 B "Browser (private)"
+fi
+
+# Essential default applications keep guarded shortcuts only while selected.
+if [[ $omawrite_allowed == true ]]; then
+  consider_binding "SUPER + SHIFT + W" 65 W "Omawrite" omawrite
+else
+  consider_binding "SUPER + SHIFT + W" 65 W "Omawrite"
+fi
+if [[ $omacalc_allowed == true ]]; then
+  consider_binding "SUPER + CTRL + Q" 68 Q "Calculator" omacalc
+  consider_binding "XF86Calculator" 0 XF86Calculator "Calculator" omacalc
+else
+  consider_binding "SUPER + CTRL + Q" 68 Q "Calculator"
+  consider_binding "XF86Calculator" 0 XF86Calculator "Calculator"
+fi
+
+# Other stock application and web-app launchers bypass the menu allowlist, so
+# they are temporarily removed. User-created or modified bindings are skipped.
+consider_binding "SUPER + RETURN" 64 RETURN "Terminal"
+consider_binding "SUPER + SHIFT + F" 65 F "File manager"
+consider_binding "SUPER + ALT + SHIFT + F" 73 F "File manager (cwd)"
+consider_binding "SUPER + SHIFT + N" 65 N "Editor"
+consider_binding "SUPER + ALT + RETURN" 72 RETURN "Tmux"
+consider_binding "SUPER + CTRL + RETURN" 68 RETURN "Herdr"
+consider_binding "SUPER + SHIFT + M" 65 M "Music"
+consider_binding "SUPER + SHIFT + ALT + M" 73 M "Music TUI"
+consider_binding "SUPER + SHIFT + D" 65 D "Docker"
+consider_binding "SUPER + SHIFT + G" 65 G "Signal"
+consider_binding "SUPER + SHIFT + O" 65 O "Obsidian"
+consider_binding "SUPER + SHIFT + SLASH" 65 SLASH "Passwords"
+consider_binding "SUPER + SHIFT + A" 65 A "ChatGPT"
+consider_binding "SUPER + SHIFT + ALT + A" 73 A "Grok"
+consider_binding "SUPER + SHIFT + C" 65 C "Calendar"
+consider_binding "SUPER + SHIFT + E" 65 E "Email"
+consider_binding "SUPER + SHIFT + ALT + E" 73 E "New email"
+consider_binding "SUPER + SHIFT + Y" 65 Y "YouTube"
+consider_binding "SUPER + SHIFT + ALT + G" 73 G "WhatsApp"
+consider_binding "SUPER + SHIFT + CTRL + G" 69 G "Google Messages"
+consider_binding "SUPER + SHIFT + P" 65 P "Google Photos"
+consider_binding "SUPER + SHIFT + S" 65 S "Google Maps"
+consider_binding "SUPER + SHIFT + X" 65 X "X"
+consider_binding "SUPER + SHIFT + ALT + X" 73 X "X Post"
+
+# Block secondary tools and settings that otherwise bypass the filtered root.
+consider_binding "SUPER + CTRL + V" 68 V "Clipboard manager"
+consider_binding "SUPER + CTRL + comma" 68 comma "Toggle silencing notifications"
+consider_binding "SUPER + ALT + comma" 72 comma "Invoke last notification"
+consider_binding "SUPER + SHIFT + ALT + comma" 73 comma "Open notification history"
+consider_binding "SUPER + CTRL + I" 68 I "Toggle locking on idle"
+consider_binding "PRINT" 0 PRINT "Screenshot"
+consider_binding "ALT + PRINT" 8 PRINT "Screenrecording"
+consider_binding "SUPER + PRINT" 64 PRINT "Color picker"
+consider_binding "SUPER + CTRL + PRINT" 68 PRINT "Extract text (OCR) from screenshot"
+consider_binding "SUPER + CTRL + S" 68 S "Share"
+consider_binding "SUPER + CTRL + PERIOD" 68 PERIOD "Transcode"
+consider_binding "SUPER + CTRL + R" 68 R "Set reminder"
+consider_binding "SUPER + CTRL + ALT + R" 76 R "Show reminders"
+consider_binding "SUPER + SHIFT + CTRL + R" 69 R "Clear reminders"
+consider_binding "SUPER + SHIFT + CTRL + A" 69 A "Agent"
+consider_binding "SUPER + CTRL + A" 68 A "Audio"
+consider_binding "SUPER + CTRL + B" 68 B "Bluetooth"
+consider_binding "SUPER + CTRL + D" 68 D "Display"
+consider_binding "SUPER + CTRL + ALT + D" 76 D "Calendar"
+consider_binding "SUPER + CTRL + W" 68 W "Network"
+consider_binding "SUPER + CTRL + P" 68 P "Power"
+consider_binding "SUPER + CTRL + T" 68 T "Activity"
+
+if ((changed == 0)); then
+  json_result enter false 0 "$skipped" false
+  exit 0
+fi
+
+# Mark ownership before applying. If the shell disappears mid-transition, the
+# next service instance knows to reload the real configuration before retrying.
+printf 'version=1\n' >"$ACTIVE_MARKER"
+if ! error=$($HYPRCTL_BIN eval "$lua_program" 2>&1); then
+  restore_error=""
+  reload_bindings >/dev/null 2>&1 || restore_error="; automatic restore also failed"
+  rm -f -- "$ACTIVE_MARKER"
+  json_result enter false "$changed" "$skipped" false "Could not apply Kids Mode shortcuts: $error$restore_error"
+  exit 1
+fi
+
+json_result enter true "$changed" "$skipped" false
