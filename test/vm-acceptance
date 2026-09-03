@@ -11,6 +11,7 @@ ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
 MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
 NOTIFICATION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/notifications.json"
+KIDS_BROWSER_PROFILE="$HOME/.local/share/omarchy-kids/chromium"
 MANAGER_ID=omarchy-kids.manager
 
 mkdir -p "$ARTIFACTS"
@@ -121,6 +122,33 @@ lock_is() {
   [[ $(omarchy-shell lock isLocked 2>/dev/null) == "$1" ]]
 }
 
+youtube_window_with_kids_profile() {
+  local pid command
+  while read -r pid; do
+    [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/cmdline ]] || continue
+    command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+    [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* ]] && return 0
+  done < <(hyprctl -j clients | jq -r '
+    .[]
+    | select(.workspace.name == "omarchy-kids")
+    | select((.class|ascii_downcase|contains("youtube")) or (.title|ascii_downcase|contains("youtube")))
+    | .pid
+  ')
+  return 1
+}
+
+close_kids_youtube_window() {
+  local address
+  address=$(hyprctl -j clients | jq -r '
+    .[]
+    | select(.workspace.name == "omarchy-kids")
+    | select((.class|ascii_downcase|contains("youtube")) or (.title|ascii_downcase|contains("youtube")))
+    | .address
+  ' | head -1)
+  [[ -n $address ]] || return 0
+  hyprctl --quiet dispatch "hl.dsp.window.close({ window = \"address:$address\" })"
+}
+
 cleanup() {
   omarchy-shell shell hide omarchy.menu >/dev/null 2>&1 || true
   if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' >/dev/null; then
@@ -186,7 +214,7 @@ wtype -k Escape
 wait_until "kids root closes" 15 layer_absent
 
 mkdir -p "$(dirname -- "$ALLOWLIST")"
-jq -n '{version: 1, allowedDesktopIds: ["chromium", "omacalc", "omawrite", "omacut"]}' > "$ALLOWLIST"
+jq -n '{version: 1, allowedDesktopIds: ["YouTube", "chromium", "omacalc", "omawrite", "omacut"]}' > "$ALLOWLIST"
 sleep 1
 
 omarchy menu summon apps >/dev/null
@@ -197,6 +225,17 @@ fi
 screenshot success-user-added-app
 wtype -k Escape
 wait_until "legacy Apps route closes" 15 layer_absent
+
+if desktop_present YouTube && command -v chromium >/dev/null; then
+  omarchy menu summon apps >/dev/null
+  wait_until "kids root opens for web-app launch" 15 layer_present
+  wtype YouTube -s 100 -k Return
+  wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
+  close_kids_youtube_window
+  pass "Kids web-app window closed after profile check"
+else
+  pass "Kids web-app profile check skipped (YouTube or Chromium absent)"
+fi
 
 omarchy menu summon system >/dev/null
 wait_until "blocked stock route returns to kids root" 15 layer_present

@@ -48,6 +48,17 @@ Loader {
       )
     }
 
+    function entryFor(desktopId) {
+      if (!root.sourceAppLibrary) return null
+      var expected = KidsBrowser.normalizeDesktopId(desktopId)
+      var rows = root.sourceAppLibrary.sortedEntries("")
+      for (var i = 0; i < rows.length; i++) {
+        var entry = rows[i] ? rows[i].entry : null
+        if (entry && KidsBrowser.normalizeDesktopId(entry.id) === expected) return entry
+      }
+      return null
+    }
+
     function entryName(entry) {
       return root.sourceAppLibrary ? root.sourceAppLibrary.entryName(entry) : ""
     }
@@ -63,12 +74,18 @@ Loader {
     function launch(desktopId, name) {
       if (!root.sourceAppLibrary) return
 
-      // Chromium launched from Kids Mode gets a persistent, login-free local
-      // profile. The normal Omarchy menu still uses the regular desktop entry.
-      if (KidsBrowser.isChromium(desktopId)) {
+      var entry = filteredAppLibrary.entryFor(desktopId)
+      var webAppUrl = KidsBrowser.webAppUrl(
+        entry ? entry.command : [],
+        entry ? entry.execString : ""
+      )
+      // Browser entries and Omarchy web apps launched from Kids Mode all use
+      // one persistent, login-free Chromium profile. This prevents a web-app
+      // shortcut such as YouTube from falling through to the adult profile.
+      if (KidsBrowser.isBrowser(desktopId) || webAppUrl) {
         if (typeof root.sourceAppLibrary.beginLaunchFeedback === "function")
           root.sourceAppLibrary.beginLaunchFeedback(name)
-        Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir))
+        Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, webAppUrl))
         root.guardAppLaunch()
         return
       }

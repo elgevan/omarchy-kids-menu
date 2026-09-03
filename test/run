@@ -18,6 +18,7 @@ fail() {
 jq -e '
   .schemaVersion == 1 and
   .id == "omarchy-kids.menu" and
+  .version == "0.9.1" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -91,6 +92,29 @@ const browser = require(process.argv[2])
 assert.equal(browser.isChromium("chromium"), true)
 assert.equal(browser.isChromium("chromium.desktop"), true)
 assert.equal(browser.isChromium("google-chrome"), false)
+assert.equal(browser.isBrowser("chromium"), true)
+assert.equal(browser.isBrowser("google-chrome.desktop"), true)
+assert.equal(browser.isBrowser("google-chrome-stable"), true)
+assert.equal(browser.isBrowser("firefox"), false)
+assert.equal(
+  browser.webAppUrl(["omarchy-launch-webapp", "https://youtube.com/"]),
+  "https://youtube.com/"
+)
+assert.equal(
+  browser.webAppUrl(["/usr/bin/omarchy-launch-webapp", "https://music.youtube.com", "--new-window"]),
+  "https://music.youtube.com"
+)
+assert.equal(browser.webAppUrl(["omarchy-launch-webapp", "file:///tmp/not-web"]), "")
+assert.equal(browser.webAppUrl(["chromium", "https://youtube.com/"]), "")
+assert.equal(
+  browser.webAppUrl([], "omarchy-launch-webapp https://youtube.com/"),
+  "https://youtube.com/"
+)
+assert.equal(
+  browser.webAppUrl([], "/usr/bin/omarchy-launch-webapp 'https://music.youtube.com' --new-window"),
+  "https://music.youtube.com"
+)
+assert.equal(browser.webAppUrl([], "chromium https://youtube.com/"), "")
 assert.equal(browser.profileDir("/home/kid/"), "/home/kid/.local/share/omarchy-kids/chromium")
 assert.deepEqual(browser.launchCommand("/home/kid"), [
   "uwsm-app",
@@ -101,6 +125,16 @@ assert.deepEqual(browser.launchCommand("/home/kid"), [
   "--no-default-browser-check",
   "--disable-sync",
   "--new-window"
+])
+assert.deepEqual(browser.launchCommand("/home/kid", "https://youtube.com/"), [
+  "uwsm-app",
+  "--",
+  "/usr/bin/chromium",
+  "--user-data-dir=/home/kid/.local/share/omarchy-kids/chromium",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-sync",
+  "--app=https://youtube.com/"
 ])
 NODE
 
@@ -121,13 +155,17 @@ rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
   || fail "menu is not filtering and launching through Omarchy DesktopEntries"
 
-rg -q 'KidsBrowser\.isChromium' "$PLUGIN_ROOT/Menu.qml" \
+rg -q 'KidsBrowser\.isBrowser' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'KidsBrowser\.webAppUrl' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'function entryFor' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'entry\.execString' "$PLUGIN_ROOT/Menu.qml" \
   && rg -Fq 'Quickshell.execDetached(KidsBrowser.launchCommand' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q -- '--user-data-dir=' "$PLUGIN_ROOT/KidsBrowser.js" \
   && rg -q -- '--no-first-run' "$PLUGIN_ROOT/KidsBrowser.js" \
   && rg -q -- '--disable-sync' "$PLUGIN_ROOT/KidsBrowser.js" \
   && rg -q -- '--new-window' "$PLUGIN_ROOT/KidsBrowser.js" \
-  || fail "Kids Mode Chromium is not isolated in its persistent local profile"
+  && rg -q -- '--app=' "$PLUGIN_ROOT/KidsBrowser.js" \
+  || fail "Kids Mode browser and web-app launches are not isolated in the persistent local profile"
 
 rg -q 'special:omarchy-kids-parent' "$WINDOW_SESSION" \
   && rg -q 'hl\.dsp\.window\.move' "$WINDOW_SESSION" \

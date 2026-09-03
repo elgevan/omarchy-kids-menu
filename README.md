@@ -8,7 +8,7 @@ There is no Apps submenu. The plugin redirects Omarchy's stock Apps-menu shortcu
 
 The initial allowlist is Google Chrome, Chromium, Omawrite, and Omacalc. These are desktop-entry IDs, not launch commands: a default app appears only when it is installed. Style follows the same rule and is omitted when Omarchy's style commands are unavailable.
 
-Chromium launched from the filtered Kids Mode menu uses its own persistent local profile at `~/.local/share/omarchy-kids/chromium`. It skips Chromium's first-run and default-browser prompts and disables browser sync, so no browser login is required. Its bookmarks, history, extensions, and local settings remain separate from the user's normal Chromium profile and persist across reboots. When Kids Mode is off, Chromium launches normally through its system desktop entry.
+Browser entries launched from the filtered Kids Mode menu use a persistent local Chromium profile at `~/.local/share/omarchy-kids/chromium`. The Google Chrome entry also routes to this Kids Chromium profile instead of exposing an adult Chrome profile. Omarchy web-app desktop entries added to the allowlist, such as YouTube, launch in app mode with that same Kids profile. Chromium skips its first-run and default-browser prompts and disables browser sync, so no browser login is required. Bookmarks, history, extensions, and local settings remain separate from the user's normal browser profiles and persist across reboots. When Kids Mode is off, browser and web-app entries use Omarchy's normal launch behavior.
 
 The normal Omarchy symbol stays in its usual place on the left and opens whichever menu mode is active. A separate child icon is installed with the other plugins on the right; click it to open the Kids Mode manager. A read-only **Active/Inactive** badge reports the current state, while a separate **Start Kids Mode/Exit Kids Mode** action makes the pending change explicit. Starting Kids Mode is immediate. Exiting it opens Omarchy's native lock screen and completes only after a valid account/parent password or configured fingerprint unlocks the session. The plugin never receives or stores the credential.
 
@@ -23,6 +23,10 @@ Any installed desktop app can be added to or removed from the allowlist. Use the
 ```
 
 When Kids Mode first enables Do Not Disturb, it remembers the existing notification preference in `~/.local/state/omarchy-kids/notifications.json`. Turning Kids Mode off or disabling the plugin restores that preference. Omarchy action confirmations and trusted critical command-line alerts retain the operating system's normal DND bypass behavior.
+
+## Requirements
+
+The plugin targets Omarchy 4's Quattro shell and requires Chromium at `/usr/bin/chromium` for its isolated Kids browser and web-app launches. It otherwise uses commands already supplied by a normal Omarchy installation: `omarchy-shell`, `omarchy-notification-send`, `uwsm-app`, `hyprctl`, `jq`, and `flock`. It has no install hook, requests no elevated privileges, and never installs these dependencies itself.
 
 ## Install
 
@@ -49,7 +53,7 @@ omarchy plugin enable omarchy-kids.menu
 
 ## Scope
 
-The plugin filters the Omarchy menu, stores desktop-entry IDs and its mode in its own config, launches Chromium with a separate user-owned profile while Kids Mode is on, temporarily moves existing windows without closing them, temporarily controls Omarchy's Do Not Disturb state, keeps the standard menu symbol on the left, and manages a separate right-side bar control. It removes the menu button's right-click terminal shortcut. It does not install or remove applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent a knowledgeable user from disabling the plugin or reaching the hidden workspace through another route. Authentication protects the in-app Exit action; it is not a system security boundary.
+The plugin filters the Omarchy menu, stores desktop-entry IDs and its mode in its own config, routes browser and web-app entries through a separate user-owned Chromium profile while Kids Mode is on, temporarily moves existing windows without closing them, temporarily controls Omarchy's Do Not Disturb state, keeps the standard menu symbol on the left, and manages a separate right-side bar control. It removes the menu button's right-click terminal shortcut. It does not install or remove applications, rewrite Hyprland keybindings, restrict terminal commands, filter the web, or prevent a knowledgeable user from disabling the plugin or reaching the hidden workspace through another route. Authentication protects the in-app Exit action; it is not a system security boundary.
 
 ## Testing
 
