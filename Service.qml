@@ -4,6 +4,7 @@ import Quickshell.Io
 import "Allowlist.js" as Allowlist
 import "ModeState.js" as ModeState
 import "NotificationState.js" as NotificationState
+import "ShellIntegration.js" as ShellIntegration
 
 // Shared state for the menu and its bar-panel editor. The service reads
 // DesktopEntries, writes plugin-owned state, and temporarily enables Omarchy's
@@ -31,6 +32,8 @@ Item {
   property string windowSessionError: ""
   property bool windowSessionDesired: true
   property int windowGuardAttemptsRemaining: 0
+  property var stockMenuRestore: null
+  property bool shellIntegrationReady: false
 
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
@@ -46,7 +49,10 @@ Item {
   readonly property bool notificationsMuted: root.notificationApplied
     && root.notificationService
     && root.notificationService.doNotDisturb === true
-  readonly property string managerWidgetId: "omarchy-kids.manager"
+  readonly property string pluginId: manifest && manifest.id
+    ? String(manifest.id)
+    : "io.github.elgevan.omarchy-kids"
+  readonly property string managerWidgetId: pluginId + ".manager"
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
     : ""
@@ -129,6 +135,7 @@ Item {
     if (changed) root.kidsModeChanged()
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
+    root.scheduleShellIntegration()
   }
 
   function setKidsModeEnabled(enabled) {
@@ -139,6 +146,7 @@ Item {
     root.persistModeState()
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
+    root.scheduleShellIntegration()
   }
 
   function persistModeState() {
@@ -267,74 +275,40 @@ Item {
     windowGuardTimer.restart()
   }
 
-  function managerEntryMatches(entry) {
-    return entry && String(entry.id || "") === root.managerWidgetId
-      && String(entry.type || "") === "qml"
-      && String(entry.source || "") === root.managerWidgetPath
+  function scheduleShellIntegration() {
+    shellIntegrationSetup.restart()
   }
 
-  function managerLocation(config) {
-    var layout = config && config.bar ? config.bar.layout : null
-    var sections = ["left", "center", "right"]
-    if (!layout) return null
-    for (var s = 0; s < sections.length; s++) {
-      var entries = layout[sections[s]]
-      if (!Array.isArray(entries)) continue
-      for (var i = 0; i < entries.length; i++) {
-        if (entries[i] && String(entries[i].id || "") === root.managerWidgetId)
-          return { section: sections[s], index: i, entry: entries[i] }
-      }
-    }
-    return null
-  }
+  function syncShellIntegration() {
+    if (!root.modeStateLoaded || !root.shell
+        || typeof root.shell.mutateShellConfig !== "function"
+        || !root.managerWidgetPath || !root.pluginId)
+      return
 
-  function ensureManagerWidget() {
-    if (!root.shell || typeof root.shell.mutateShellConfig !== "function" || !root.managerWidgetPath) return
-    var existing = root.managerLocation(root.shell.shellConfig)
-    if (existing && root.managerEntryMatches(existing.entry)) return
+    // The stock menu is deliberately unavailable while Kids Mode is active:
+    // without clonedFrom, its IPC route cannot be redirected safely.
+    if (root.kidsModeEnabled && typeof root.shell.hide === "function")
+      root.shell.hide(ShellIntegration.STOCK_MENU_ID)
 
     root.shell.mutateShellConfig(function(config) {
-      if (!config.bar) config.bar = ({})
-      if (!config.bar.layout) config.bar.layout = ({})
-      var sections = ["left", "center", "right"]
-      for (var s = 0; s < sections.length; s++) {
-        if (!Array.isArray(config.bar.layout[sections[s]])) config.bar.layout[sections[s]] = []
-      }
-
-      var entry = { id: root.managerWidgetId, type: "qml", source: root.managerWidgetPath }
-      var location = root.managerLocation(config)
-      if (location) {
-        config.bar.layout[location.section][location.index] = entry
-        return
-      }
-
-      var right = config.bar.layout.right
-      var insertAt = 0
-      for (var i = 0; i < right.length; i++) {
-        if (right[i] && String(right[i].id || right[i]) === "omarchy.tray") {
-          insertAt = i + 1
-          break
-        }
-      }
-      right.splice(insertAt, 0, entry)
+      var result = ShellIntegration.activate(
+        config,
+        root.pluginId,
+        root.managerWidgetId,
+        root.managerWidgetPath,
+        root.kidsModeEnabled
+      )
+      if (result && result.restore) root.stockMenuRestore = result.restore
     })
+    root.shellIntegrationReady = true
   }
 
-  function removeManagerWidget() {
+  function releaseShellIntegration() {
     if (!root.shell || typeof root.shell.mutateShellConfig !== "function") return
-    if (!root.managerLocation(root.shell.shellConfig)) return
     root.shell.mutateShellConfig(function(config) {
-      var layout = config && config.bar ? config.bar.layout : null
-      if (!layout) return
-      var sections = ["left", "center", "right"]
-      for (var s = 0; s < sections.length; s++) {
-        var entries = layout[sections[s]]
-        if (!Array.isArray(entries)) continue
-        layout[sections[s]] = entries.filter(function(entry) {
-          return String((entry && entry.id) || entry || "") !== root.managerWidgetId
-        })
-      }
+      ShellIntegration.deactivate(config, root.managerWidgetId, root.stockMenuRestore)
     })
+    root.shellIntegrationReady = false
   }
 
   FileView {
@@ -438,9 +412,9 @@ Item {
   }
 
   Timer {
-    id: managerSetup
+    id: shellIntegrationSetup
     interval: 0
-    onTriggered: root.ensureManagerWidget()
+    onTriggered: root.syncShellIntegration()
   }
 
   Timer {
@@ -458,26 +432,26 @@ Item {
   }
 
   onShellChanged: {
-    managerSetup.restart()
+    root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
   }
   onManifestChanged: {
-    managerSetup.restart()
+    root.scheduleShellIntegration()
     root.scheduleWindowSessionSync()
   }
   onNotificationServiceChanged: root.scheduleNotificationSetup()
 
   Component.onCompleted: {
     ensureDirectory.running = true
-    managerSetup.restart()
+    root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
   }
 
   Component.onDestruction: {
-    if (root.pluginRegistry && !root.pluginRegistry.isEnabled("omarchy-kids.menu")) {
+    if (root.pluginRegistry && !root.pluginRegistry.isEnabled(root.pluginId)) {
       root.releaseNotificationPolicy()
-      root.removeManagerWidget()
+      root.releaseShellIntegration()
       if (root.windowSessionTool)
         Quickshell.execDetached([root.windowSessionTool, "exit"])
     }

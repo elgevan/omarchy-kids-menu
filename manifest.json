@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy-kids.menu",
+  "id": "io.github.elgevan.omarchy-kids",
   "name": "Omarchy Kids Menu",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "author": "Omarchy Kids",
   "license": "MIT",
   "description": "A switchable Kids Mode with authenticated exit, an app allowlist, muted notifications, isolated browser and web-app launches, and reversible window hiding.",
@@ -23,8 +23,5 @@
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left"
-  },
-  "omarchy": {
-    "clonedFrom": "omarchy.menu"
   }
 }

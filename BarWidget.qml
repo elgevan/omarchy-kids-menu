@@ -1,11 +1,11 @@
 import QtQuick
 import qs.Ui
 
-// Preserve the normal Omarchy menu button and its usual left-hand position.
-// The separate Kids manager widget is installed on the right by Service.qml.
+// Preserve the normal Omarchy menu symbol while using this plugin's own
+// permanent ID. Service.qml moves this widget into the stock menu's bar slot.
 BarWidget {
   id: root
-  moduleName: "omarchy-kids.menu"
+  moduleName: "io.github.elgevan.omarchy-kids"
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -20,7 +20,7 @@ BarWidget {
     tooltipText: "Omarchy menu"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton && root.bar)
-        root.bar.run("omarchy-shell shell toggle omarchy.menu '{\"menu\":\"apps\"}'")
+        root.bar.run("omarchy-shell shell toggle io.github.elgevan.omarchy-kids '{\"menu\":\"apps\"}'")
     }
   }
 }

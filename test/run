@@ -15,16 +15,18 @@ fail() {
   exit 1
 }
 
+[[ -f $PLUGIN_ROOT/LICENSE ]] || fail "repository license is missing"
+
 jq -e '
   .schemaVersion == 1 and
-  .id == "omarchy-kids.menu" and
-  .version == "0.9.1" and
+  .id == "io.github.elgevan.omarchy-kids" and
+  .version == "0.10.0" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
   .entryPoints.service == "Service.qml" and
-  .omarchy.clonedFrom == "omarchy.menu"
-' "$MANIFEST" >/dev/null || fail "manifest does not declare a menu/bar/service clone"
+  (.omarchy? == null)
+' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
 
 jq -e . "$MENU" >/dev/null || fail "kids menu is not valid JSONC/JSON"
 jq -e 'keys | length == 0' "$EMPTY_MENU" >/dev/null || fail "menu extension guard is not empty"
@@ -83,6 +85,80 @@ assert.equal(state.parseEnabled("not json"), true)
 assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: false})), false)
 assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
+NODE
+
+node - "$PLUGIN_ROOT/ShellIntegration.js" <<'NODE'
+const assert = require("node:assert/strict")
+const integration = require(process.argv[2])
+
+const pluginId = "io.github.elgevan.omarchy-kids"
+const managerId = pluginId + ".manager"
+const managerPath = "/plugins/omarchy-kids/ManagerWidget.qml"
+const config = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [
+        {id: "omarchy.menu", custom: "preserved"},
+        {id: "omarchy.workspaces"},
+        {id: pluginId}
+      ],
+      center: [],
+      right: [{id: "omarchy.tray"}, {id: "omarchy.audio"}]
+    }
+  },
+  plugins: []
+}
+
+let result = integration.activate(config, pluginId, managerId, managerPath, true)
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+assert.equal(config.bar.layout.left[0].kidsMenuRestore.entry.custom, "preserved")
+assert.equal(config.bar.layout.right[1].id, managerId)
+assert.equal(config.bar.layout.right[1].source, managerPath)
+assert.deepEqual(config.disabledPlugins, ["omarchy.menu"])
+assert.deepEqual(result.restore, {
+  section: "left",
+  index: 0,
+  entry: {id: "omarchy.menu", custom: "preserved"}
+})
+
+result = integration.activate(config, pluginId, managerId, managerPath, false)
+assert.equal(config.bar.layout.left.filter(entry => integration.entryId(entry) === pluginId).length, 1)
+assert.equal(config.bar.layout.right.filter(entry => integration.entryId(entry) === managerId).length, 1)
+assert.equal(config.disabledPlugins, undefined)
+
+config.bar.layout.left = config.bar.layout.left.filter(entry => integration.entryId(entry) !== pluginId)
+integration.deactivate(config, managerId, result.restore)
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), ["omarchy.menu", "omarchy.workspaces"])
+assert.equal(config.bar.layout.left[0].custom, "preserved")
+assert.equal(integration.barLocation(config, managerId), null)
+assert.equal(config.disabledPlugins, undefined)
+
+const customConfig = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [{id: pluginId}, {id: "omarchy.workspaces"}, {id: "omarchy.menu"}],
+      center: [],
+      right: []
+    }
+  },
+  plugins: []
+}
+result = integration.activate(customConfig, pluginId, managerId, managerPath, true)
+assert.deepEqual(customConfig.bar.layout.left.map(integration.entryId), ["omarchy.workspaces", pluginId])
+assert.equal(result.restore.index, 1)
+
+const noStockConfig = {
+  version: 1,
+  bar: {layout: {left: [{id: pluginId}], center: [], right: []}},
+  plugins: []
+}
+result = integration.activate(noStockConfig, pluginId, managerId, managerPath, true)
+assert.equal(result.restore, null)
+noStockConfig.bar.layout.left = []
+integration.deactivate(noStockConfig, managerId, result.restore)
+assert.equal(integration.barLocation(noStockConfig, "omarchy.menu"), null)
 NODE
 
 node - "$PLUGIN_ROOT/KidsBrowser.js" <<'NODE'
@@ -190,10 +266,16 @@ rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'selectionFilter === "not-selected"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'filterLabel: "NOT SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'Qt\.Key_3' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'managerWidgetId: "omarchy-kids\.manager"' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'config\.bar\.layout\.right' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'managerWidgetId: pluginId \+ "\.manager"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'ShellIntegration\.activate' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
   || fail "right-side app manager is not wired to the persisted allowlist and quick filters"
+
+rg -q 'setStockMenuDisabled\(config, kidsModeEnabled === true\)' "$PLUGIN_ROOT/ShellIntegration.js" \
+  && rg -q 'ShellIntegration\.deactivate' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.shell\.hide\(ShellIntegration\.STOCK_MENU_ID\)' "$PLUGIN_ROOT/Service.qml" \
+  && ! jq -e '.omarchy.clonedFrom? != null' "$MANIFEST" >/dev/null \
+  || fail "standalone shell integration does not block and restore the stock menu cleanly"
 
 rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'root\.kidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
@@ -222,12 +304,12 @@ fi
 
 rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \
-  && rg -q 'omarchy-shell shell toggle omarchy\.menu' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -q 'omarchy-shell shell toggle io\.github\.elgevan\.omarchy-kids' "$PLUGIN_ROOT/BarWidget.qml" \
   || fail "left menu button does not preserve the normal Omarchy symbol"
 
-rg -q 'moduleName: "omarchy-kids\.manager"' "$PLUGIN_ROOT/ManagerWidget.qml" \
+rg -q 'moduleName: "io\.github\.elgevan\.omarchy-kids\.manager"' "$PLUGIN_ROOT/ManagerWidget.qml" \
   && rg -q 'text: ""' "$PLUGIN_ROOT/ManagerWidget.qml" \
-  && rg -q 'ipcTarget: "omarchy-kids\.manager"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'ipcTarget: "io\.github\.elgevan\.omarchy-kids\.manager"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'onPressed: root\.togglePanel' "$PLUGIN_ROOT/ManagerWidget.qml" \
   || fail "separate Kids manager widget is not a normal standalone bar control"
 

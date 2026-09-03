@@ -6,10 +6,10 @@ import qs.Ui
 // Service.qml. The stock-looking left button remains dedicated to the menu.
 BarWidget {
   id: root
-  moduleName: "omarchy-kids.manager"
+  moduleName: "io.github.elgevan.omarchy-kids.manager"
 
   readonly property var allowlistService: bar && bar.shell
-    ? bar.shell.serviceFor("omarchy-kids.menu")
+    ? bar.shell.serviceFor("io.github.elgevan.omarchy-kids")
     : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool kidsModeEnabled: allowlistService

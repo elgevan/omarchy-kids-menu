@@ -6,13 +6,13 @@
 set -Eeuo pipefail
 
 PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-PLUGIN_ID=omarchy-kids.menu
+PLUGIN_ID=io.github.elgevan.omarchy-kids
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
 MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
 NOTIFICATION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/notifications.json"
 KIDS_BROWSER_PROFILE="$HOME/.local/share/omarchy-kids/chromium"
-MANAGER_ID=omarchy-kids.manager
+MANAGER_ID=$PLUGIN_ID.manager
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -76,7 +76,7 @@ desktop_present() {
 
 plugin_enabled() {
   omarchy plugin list --json | jq -e --arg id "$PLUGIN_ID" '
-    any(.[]; .id == $id and .enabled == true and .clonedFrom == "omarchy.menu")
+    any(.[]; .id == $id and .enabled == true and .clonedFrom == "")
   '
 }
 
@@ -84,6 +84,21 @@ stock_menu_restored() {
   omarchy plugin list --json | jq -e '
     any(.[]; .id == "omarchy.menu" and .enabled == true)
   '
+}
+
+stock_menu_blocked() {
+  jq -e '(.disabledPlugins // []) | index("omarchy.menu") != null' \
+    "$HOME/.config/omarchy/shell.json"
+}
+
+stock_menu_available() {
+  jq -e '(.disabledPlugins // []) | index("omarchy.menu") == null' \
+    "$HOME/.config/omarchy/shell.json"
+}
+
+kids_menu_summon() {
+  local route=${1:-root}
+  omarchy-shell shell summon "$PLUGIN_ID" "$(jq -nc --arg menu "$route" '{menu: $menu}')"
 }
 
 menu_symbol_on_left() {
@@ -151,6 +166,7 @@ close_kids_youtube_window() {
 
 cleanup() {
   omarchy-shell shell hide omarchy.menu >/dev/null 2>&1 || true
+  omarchy-shell shell hide "$PLUGIN_ID" >/dev/null 2>&1 || true
   if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' >/dev/null; then
     omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
     omarchy plugin remove "$PLUGIN_ID" --yes >/dev/null 2>&1 || true
@@ -168,13 +184,17 @@ dnd_before=$(omarchy-shell notifications isDnd)
 [[ $dnd_before == on || $dnd_before == off ]] || fail "read initial notification state"
 
 omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
-wait_until "kids plugin becomes the active Omarchy menu" 20 plugin_enabled
+wait_until "standalone kids plugin becomes active" 20 plugin_enabled
 wait_until "normal Omarchy menu symbol remains on the left" 20 menu_symbol_on_left
 wait_until "separate Kids manager appears on the right" 20 manager_on_right
 wait_until "Kids Mode defaults to on" 20 mode_is on
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
-[[ $(omarchy menu ping) == ok ]] || fail "kids menu answers stock menu IPC"
-pass "kids menu answers stock menu IPC"
+wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
+[[ $(omarchy-shell shell call "$PLUGIN_ID" ping '{}') == ok ]] \
+  || fail "kids menu answers its standalone IPC"
+pass "kids menu answers its standalone IPC"
+[[ $(omarchy menu ping) == unknown ]] || fail "stock menu IPC is unavailable in Kids Mode"
+pass "stock menu IPC is unavailable in Kids Mode"
 
 notify-send -a "Kids Mode Acceptance" "Hidden in Kids Mode"
 sleep 1
@@ -185,7 +205,7 @@ installed="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 omarchy plugin validate "$installed"
 pass "installed plugin passes Omarchy validation"
 
-omarchy menu summon root >/dev/null
+kids_menu_summon root >/dev/null
 wait_until "kids root menu opens" 15 layer_present
 if command -v omarchy-theme-switcher >/dev/null || command -v omarchy-theme-bg-switcher >/dev/null; then
   wait_until "flat root includes Style when Omarchy style tools exist" 15 screen_contains Style
@@ -217,7 +237,7 @@ mkdir -p "$(dirname -- "$ALLOWLIST")"
 jq -n '{version: 1, allowedDesktopIds: ["YouTube", "chromium", "omacalc", "omawrite", "omacut"]}' > "$ALLOWLIST"
 sleep 1
 
-omarchy menu summon apps >/dev/null
+kids_menu_summon apps >/dev/null
 wait_until "legacy Apps route opens the flat root" 15 layer_present
 if desktop_present omacut; then
   wait_until "a user-added installed app appears" 15 screen_contains Omacut
@@ -227,7 +247,7 @@ wtype -k Escape
 wait_until "legacy Apps route closes" 15 layer_absent
 
 if desktop_present YouTube && command -v chromium >/dev/null; then
-  omarchy menu summon apps >/dev/null
+  kids_menu_summon apps >/dev/null
   wait_until "kids root opens for web-app launch" 15 layer_present
   wtype YouTube -s 100 -k Return
   wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
@@ -237,7 +257,7 @@ else
   pass "Kids web-app profile check skipped (YouTube or Chromium absent)"
 fi
 
-omarchy menu summon system >/dev/null
+kids_menu_summon system >/dev/null
 wait_until "blocked stock route returns to kids root" 15 layer_present
 wait_until "blocked stock route does not expose Lock" 15 screen_lacks Lock
 wait_until "blocked stock route still shows Style" 15 screen_contains Style
@@ -270,6 +290,7 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "valid authentication unlocks the session" 20 lock_is false
   wait_until "valid authentication turns Kids Mode off" 20 mode_is off
   wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
+  wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
   manager_on_right || fail "Kids Mode manager remains available while off"
   pass "Kids Mode manager remains available while off"
 
@@ -281,11 +302,18 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wtype -k Escape
   wait_until "normal menu closes after internal Off test" 15 layer_absent
 
+  kids_menu_summon root >/dev/null
+  wait_until "standalone menu also shows normal content while off" 15 layer_present
+  wait_until "standalone normal menu shows Learn" 15 screen_contains Learn
+  wtype -k Escape
+  wait_until "standalone normal menu closes while off" 15 layer_absent
+
   omarchy-shell "$MANAGER_ID" show
   wait_until "Kids Mode manager reopens while off" 15 screen_contains "KIDS MODE"
   wtype -M ctrl -M shift -k k -m shift -m ctrl
   wait_until "turning Kids Mode on is immediate" 15 mode_is on
   wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
+  wait_until "turning Kids Mode on blocks stock menu IPC again" 15 stock_menu_blocked
   lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
   pass "turning Kids Mode on does not request authentication"
   omarchy-shell "$MANAGER_ID" hide
