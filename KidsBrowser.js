@@ -20,7 +20,8 @@ function launchCommand(homeDir) {
     "--user-data-dir=" + profileDir(homeDir),
     "--no-first-run",
     "--no-default-browser-check",
-    "--disable-sync"
+    "--disable-sync",
+    "--new-window"
   ]
 }
 

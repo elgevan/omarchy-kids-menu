@@ -6,8 +6,9 @@ PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 MANIFEST="$PLUGIN_ROOT/manifest.json"
 MENU="$PLUGIN_ROOT/kids-menu.jsonc"
 EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
+WINDOW_SESSION="$PLUGIN_ROOT/window-session"
 
-bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance"
+bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" "$WINDOW_SESSION"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -98,9 +99,22 @@ assert.deepEqual(browser.launchCommand("/home/kid"), [
   "--user-data-dir=/home/kid/.local/share/omarchy-kids/chromium",
   "--no-first-run",
   "--no-default-browser-check",
-  "--disable-sync"
+  "--disable-sync",
+  "--new-window"
 ])
 NODE
+
+[[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
+window_test_dir=$(mktemp -d)
+window_status=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    "$WINDOW_SESSION" status
+)
+rm -rf -- "$window_test_dir"
+jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
+  <<< "$window_status" >/dev/null \
+  || fail "window-session helper does not report a clean inactive state"
 
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
@@ -112,7 +126,18 @@ rg -q 'KidsBrowser\.isChromium' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q -- '--user-data-dir=' "$PLUGIN_ROOT/KidsBrowser.js" \
   && rg -q -- '--no-first-run' "$PLUGIN_ROOT/KidsBrowser.js" \
   && rg -q -- '--disable-sync' "$PLUGIN_ROOT/KidsBrowser.js" \
+  && rg -q -- '--new-window' "$PLUGIN_ROOT/KidsBrowser.js" \
   || fail "Kids Mode Chromium is not isolated in its persistent local profile"
+
+rg -q 'special:omarchy-kids-parent' "$WINDOW_SESSION" \
+  && rg -q 'hl\.dsp\.window\.move' "$WINDOW_SESSION" \
+  && rg -q 'hl\.dsp\.window\.pin' "$WINDOW_SESSION" \
+  && rg -q 'hl\.dsp\.focus' "$WINDOW_SESSION" \
+  && rg -q 'originalActiveWorkspace' "$WINDOW_SESSION" \
+  && rg -q 'Quickshell\.execDetached\(\[root\.windowSessionTool, "exit"\]\)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'function guardAppLaunch' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'parent windows hidden' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "Kids Mode does not reversibly hide and guard pre-existing windows"
 
 rg -q 'item\.userMenuPath = root\.pluginRoot \+ "/empty-menu\.jsonc"' "$PLUGIN_ROOT/Menu.qml" \
   || fail "normal menu extensions can leak unfiltered actions into kids mode"

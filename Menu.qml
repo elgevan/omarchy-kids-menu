@@ -69,10 +69,12 @@ Loader {
         if (typeof root.sourceAppLibrary.beginLaunchFeedback === "function")
           root.sourceAppLibrary.beginLaunchFeedback(name)
         Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir))
+        root.guardAppLaunch()
         return
       }
 
       root.sourceAppLibrary.launch(desktopId, name)
+      root.guardAppLaunch()
     }
 
     function refreshIcons() {
@@ -117,6 +119,12 @@ Loader {
       // Let the stock menu handle malformed or non-JSON payloads as usual.
     }
     return raw
+  }
+
+  function guardAppLaunch() {
+    if (root.allowlistService
+        && typeof root.allowlistService.guardAppLaunch === "function")
+      root.allowlistService.guardAppLaunch()
   }
 
   function configureMenu() {

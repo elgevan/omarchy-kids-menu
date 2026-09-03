@@ -26,6 +26,11 @@ Item {
   property bool notificationRestoreDnd: false
   property bool notificationApplied: false
   property int notificationSetupAttempts: 0
+  property int hiddenWindowCount: 0
+  property bool windowSessionBusy: false
+  property string windowSessionError: ""
+  property bool windowSessionDesired: true
+  property int windowGuardAttemptsRemaining: 0
 
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
@@ -44,6 +49,9 @@ Item {
   readonly property string managerWidgetId: "omarchy-kids.manager"
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
+    : ""
+  readonly property string windowSessionTool: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) + "/window-session"
     : ""
 
   signal allowlistChanged()
@@ -120,6 +128,7 @@ Item {
     root.modeStateLoaded = true
     if (changed) root.kidsModeChanged()
     root.scheduleNotificationSetup()
+    root.scheduleWindowSessionSync()
   }
 
   function setKidsModeEnabled(enabled) {
@@ -129,6 +138,7 @@ Item {
     root.kidsModeChanged()
     root.persistModeState()
     root.scheduleNotificationSetup()
+    root.scheduleWindowSessionSync()
   }
 
   function persistModeState() {
@@ -204,6 +214,57 @@ Item {
     return root.kidsModeEnabled
       ? root.applyNotificationPolicy()
       : root.releaseNotificationPolicy()
+  }
+
+  function parseWindowSessionOutput(rawText) {
+    try {
+      var parsed = JSON.parse(String(rawText || "").trim())
+      return parsed && typeof parsed === "object" ? parsed : null
+    } catch (error) {
+      return null
+    }
+  }
+
+  function scheduleWindowSessionSync() {
+    if (!root.modeStateLoaded || !root.windowSessionTool) return
+    root.windowSessionDesired = root.kidsModeEnabled
+    windowSessionSync.restart()
+  }
+
+  function syncWindowSession() {
+    if (!root.modeStateLoaded || !root.windowSessionTool
+        || windowSessionEnter.running || windowSessionExit.running)
+      return
+
+    root.windowSessionBusy = true
+    root.windowSessionError = ""
+    if (root.windowSessionDesired) windowSessionEnter.running = true
+    else windowSessionExit.running = true
+  }
+
+  function finishWindowSession(action, exitCode, output) {
+    var result = root.parseWindowSessionOutput(output)
+    root.windowSessionBusy = false
+
+    if (exitCode !== 0 || !result) {
+      root.windowSessionError = action === "enter"
+        ? "Could not hide existing windows"
+        : "Could not restore hidden windows"
+    } else if (action === "enter") {
+      root.hiddenWindowCount = Math.max(0, Number(result.hidden || 0))
+    } else {
+      root.hiddenWindowCount = 0
+    }
+
+    if ((action === "enter") !== root.windowSessionDesired)
+      windowSessionSync.restart()
+  }
+
+  function guardAppLaunch() {
+    if (!root.kidsModeEnabled || !root.windowSessionTool) return
+    root.windowGuardAttemptsRemaining = 2
+    windowGuardTimer.interval = 650
+    windowGuardTimer.restart()
   }
 
   function managerEntryMatches(entry) {
@@ -322,6 +383,45 @@ Item {
     }
   }
 
+  Process {
+    id: windowSessionEnter
+    command: root.windowSessionTool ? [root.windowSessionTool, "enter"] : []
+    stdout: StdioCollector { id: windowSessionEnterOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishWindowSession("enter", exitCode, windowSessionEnterOutput.text)
+    }
+  }
+
+  Process {
+    id: windowSessionExit
+    command: root.windowSessionTool ? [root.windowSessionTool, "exit"] : []
+    stdout: StdioCollector { id: windowSessionExitOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishWindowSession("exit", exitCode, windowSessionExitOutput.text)
+    }
+  }
+
+  Process {
+    id: windowSessionGuard
+    command: root.windowSessionTool ? [root.windowSessionTool, "guard"] : []
+    stdout: StdioCollector { id: windowSessionGuardOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      var result = root.parseWindowSessionOutput(windowSessionGuardOutput.text)
+      if (exitCode === 0 && result && Number(result.blocked || 0) > 0) {
+        Quickshell.execDetached([
+          "omarchy-notification-send",
+          "That app is already open outside Kids Mode and remains hidden."
+        ])
+      }
+
+      root.windowGuardAttemptsRemaining--
+      if (root.windowGuardAttemptsRemaining > 0 && root.kidsModeEnabled) {
+        windowGuardTimer.interval = 1200
+        windowGuardTimer.restart()
+      }
+    }
+  }
+
   Timer {
     id: notificationSetup
     interval: 100
@@ -343,23 +443,43 @@ Item {
     onTriggered: root.ensureManagerWidget()
   }
 
+  Timer {
+    id: windowSessionSync
+    interval: 250
+    onTriggered: root.syncWindowSession()
+  }
+
+  Timer {
+    id: windowGuardTimer
+    interval: 650
+    onTriggered: {
+      if (!windowSessionGuard.running) windowSessionGuard.running = true
+    }
+  }
+
   onShellChanged: {
     managerSetup.restart()
     root.scheduleNotificationSetup()
   }
-  onManifestChanged: managerSetup.restart()
+  onManifestChanged: {
+    managerSetup.restart()
+    root.scheduleWindowSessionSync()
+  }
   onNotificationServiceChanged: root.scheduleNotificationSetup()
 
   Component.onCompleted: {
     ensureDirectory.running = true
     managerSetup.restart()
     root.scheduleNotificationSetup()
+    root.scheduleWindowSessionSync()
   }
 
   Component.onDestruction: {
     if (root.pluginRegistry && !root.pluginRegistry.isEnabled("omarchy-kids.menu")) {
       root.releaseNotificationPolicy()
       root.removeManagerWidget()
+      if (root.windowSessionTool)
+        Quickshell.execDetached([root.windowSessionTool, "exit"])
     }
   }
 }

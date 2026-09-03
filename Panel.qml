@@ -105,7 +105,7 @@ Panel {
   }
 
   function toggleKidsMode() {
-    if (!root.service || !root.service.modeStateLoaded) return
+    if (!root.service || !root.service.modeStateLoaded || root.service.windowSessionBusy) return
     root.authError = ""
 
     if (!root.service.kidsModeEnabled) {
@@ -195,8 +195,16 @@ Panel {
             width: parent.width
             text: root.authError.length > 0
               ? root.authError
+              : root.service && root.service.windowSessionError.length > 0
+                ? root.service.windowSessionError
+                : root.service && root.service.windowSessionBusy
+                  ? root.service.kidsModeEnabled
+                    ? "Hiding open windows…"
+                    : "Restoring hidden windows…"
               : root.service && root.service.kidsModeEnabled
-                ? root.installedAllowedCount + " apps available • notifications muted"
+                ? root.service.hiddenWindowCount > 0
+                  ? root.service.hiddenWindowCount + " parent windows hidden • notifications muted"
+                  : root.installedAllowedCount + " apps available • notifications muted"
                 : "Normal Omarchy menu active • notifications restored"
             color: root.dim
             font.family: root.fontFamily
@@ -246,7 +254,7 @@ Panel {
           root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground,
           root.accent
         )
-        opacity: root.service && root.service.modeStateLoaded ? 1 : 0.55
+        opacity: root.service && root.service.modeStateLoaded && !root.service.windowSessionBusy ? 1 : 0.55
 
         Column {
           anchors.left: parent.left
@@ -258,7 +266,11 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.kidsModeEnabled
+            text: root.service && root.service.windowSessionBusy
+              ? root.service.kidsModeEnabled
+                ? "PREPARING KIDS MODE…"
+                : "RESTORING WINDOWS…"
+              : root.service && root.service.kidsModeEnabled
               ? "EXIT KIDS MODE"
               : "START KIDS MODE"
             color: root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground
@@ -269,8 +281,12 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.kidsModeEnabled
-              ? "Requires password or fingerprint"
+            text: root.service && root.service.windowSessionBusy
+              ? "Open apps remain running while they move"
+              : root.service && root.service.kidsModeEnabled
+              ? root.service.hiddenWindowCount > 0
+                ? "Authenticate to restore " + root.service.hiddenWindowCount + " windows"
+                : "Requires password or fingerprint"
               : "Apply the app filter and mute notifications"
             color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
             font.family: root.fontFamily
@@ -294,7 +310,7 @@ Panel {
         MouseArea {
           id: modeActionMouse
           anchors.fill: parent
-          enabled: root.service && root.service.modeStateLoaded
+          enabled: root.service && root.service.modeStateLoaded && !root.service.windowSessionBusy
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: root.toggleKidsMode()
