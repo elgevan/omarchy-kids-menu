@@ -8,7 +8,7 @@ There is no Apps submenu. The plugin redirects Omarchy's stock Apps-menu shortcu
 
 The initial allowlist is Google Chrome, Chromium, Omawrite, and Omacalc. These are desktop-entry IDs, not launch commands: a default app appears only when it is installed. Style follows the same rule and is omitted when Omarchy's style commands are unavailable.
 
-The normal Omarchy symbol stays in its usual place on the left and opens the filtered menu. A separate child icon is installed with the other plugins on the right; click it to open **Kids Menu Apps**, where any installed desktop app can be added to or removed from the allowlist. The selection is saved to:
+The normal Omarchy symbol stays in its usual place on the left and opens the filtered menu. A separate child icon is installed with the other plugins on the right; click it to open **Kids Menu Apps**, where any installed desktop app can be added to or removed from the allowlist. Use the **All**, **Selected**, and **Not Selected** quick filters to review the current allowlist or find apps that can still be added. Their keyboard shortcuts are `Ctrl+1`, `Ctrl+2`, and `Ctrl+3`. The selection is saved to:
 
 ```text
 ~/.config/omarchy-kids/allowed-apps.json

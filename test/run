@@ -70,10 +70,14 @@ rg -q 'function remove\(' "$PLUGIN_ROOT/Menu.qml" \
 
 rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'toggleAllowed' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'selectionFilter === "selected"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'selectionFilter === "not-selected"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'filterLabel: "NOT SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'Qt\.Key_3' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'managerWidgetId: "omarchy-kids\.manager"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'config\.bar\.layout\.right' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
-  || fail "right-side app manager is not wired to the persisted allowlist"
+  || fail "right-side app manager is not wired to the persisted allowlist and quick filters"
 
 rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \
@@ -82,6 +86,7 @@ rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
 
 rg -q 'moduleName: "omarchy-kids\.manager"' "$PLUGIN_ROOT/ManagerWidget.qml" \
   && rg -q 'text: ""' "$PLUGIN_ROOT/ManagerWidget.qml" \
+  && rg -q 'ipcTarget: "omarchy-kids\.manager"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'onPressed: root\.togglePanel' "$PLUGIN_ROOT/ManagerWidget.qml" \
   || fail "separate Kids manager widget is not a normal standalone bar control"
 

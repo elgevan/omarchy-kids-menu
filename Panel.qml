@@ -5,12 +5,14 @@ import qs.Ui
 Panel {
   id: root
   moduleName: "omarchy-kids.manager"
-  manageIpc: false
+  ipcTarget: "omarchy-kids.manager"
 
   property var anchorItem: null
   property var hostWidget: null
   property var service: null
   property string filterText: ""
+  property string selectionFilter: "all"
+  property int installedAppCount: 0
   property int installedAllowedCount: 0
 
   readonly property var barIdentity: hostWidget || root
@@ -38,13 +40,16 @@ Panel {
 
   function rebuildApps() {
     appModel.clear()
+    root.installedAppCount = 0
     root.installedAllowedCount = 0
     if (!root.appLibrary) return
 
     var installedRows = root.appLibrary.sortedEntries("")
     for (var available = 0; available < installedRows.length; available++) {
       var availableEntry = installedRows[available].entry
-      if (root.service && availableEntry && root.service.isAllowed(availableEntry.id))
+      if (!availableEntry || !String(availableEntry.id || "")) continue
+      root.installedAppCount++
+      if (root.service && root.service.isAllowed(availableEntry.id))
         root.installedAllowedCount++
     }
 
@@ -53,15 +58,39 @@ Panel {
       var entry = rows[i].entry
       var id = String(entry.id || "")
       if (!id) continue
+      var allowed = root.service ? root.service.isAllowed(id) : false
+      if (root.selectionFilter === "selected" && !allowed) continue
+      if (root.selectionFilter === "not-selected" && allowed) continue
       appModel.append({
         appId: id,
         appName: root.appLibrary.entryName(entry),
         appDetail: root.appLibrary.entrySubtext(entry),
         appIcon: root.appLibrary.iconSource(String(entry.icon || "")),
-        appAllowed: root.service ? root.service.isAllowed(id) : false
+        appAllowed: allowed
       })
     }
     if (appModel.count > 0 && appList.currentIndex < 0) appList.currentIndex = 0
+  }
+
+  function setSelectionFilter(value) {
+    if (value !== "all" && value !== "selected" && value !== "not-selected") return
+    if (root.selectionFilter === value) return
+    root.selectionFilter = value
+    root.rebuildApps()
+  }
+
+  function filterCount(value) {
+    if (value === "selected") return root.installedAllowedCount
+    if (value === "not-selected") return Math.max(0, root.installedAppCount - root.installedAllowedCount)
+    return root.installedAppCount
+  }
+
+  function emptyMessage() {
+    if (!root.appLibrary) return "Loading installed apps…"
+    if (root.filterText.length > 0) return "No apps match this search"
+    if (root.selectionFilter === "selected") return "No apps are currently selected"
+    if (root.selectionFilter === "not-selected") return "All installed apps are selected"
+    return "No installed apps found"
   }
 
   function toggleCurrent() {
@@ -179,7 +208,16 @@ Panel {
             root.rebuildApps()
           }
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape) {
+            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_1) {
+              root.setSelectionFilter("all")
+              event.accepted = true
+            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_2) {
+              root.setSelectionFilter("selected")
+              event.accepted = true
+            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_3) {
+              root.setSelectionFilter("not-selected")
+              event.accepted = true
+            } else if (event.key === Qt.Key_Escape) {
               root.close()
               event.accepted = true
             } else if (event.key === Qt.Key_Down) {
@@ -209,6 +247,61 @@ Panel {
         }
       }
 
+      ListModel {
+        id: selectionFilterModel
+        ListElement { filterKey: "all"; filterLabel: "ALL" }
+        ListElement { filterKey: "selected"; filterLabel: "SELECTED" }
+        ListElement { filterKey: "not-selected"; filterLabel: "NOT SELECTED" }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Repeater {
+          model: selectionFilterModel
+
+          delegate: BorderSurface {
+            id: filterButton
+            required property string filterKey
+            required property string filterLabel
+
+            readonly property bool selected: root.selectionFilter === filterButton.filterKey
+
+            width: (contentColumn.width - Style.space(16)) / 3
+            height: Style.space(34)
+            radius: height / 2
+            color: filterButton.selected
+              ? Style.selectedFillFor(root.accent, root.accent)
+              : filterMouse.containsMouse
+                ? Style.hoverFillFor(root.accent, root.accent)
+                : Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec(
+              filterButton.selected ? "selected" : "normal",
+              filterButton.selected ? root.accent : root.foreground,
+              root.accent
+            )
+
+            Text {
+              anchors.centerIn: parent
+              text: filterButton.filterLabel + "  " + root.filterCount(filterButton.filterKey)
+              color: filterButton.selected ? root.accent : root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: filterButton.selected
+            }
+
+            MouseArea {
+              id: filterMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.setSelectionFilter(filterButton.filterKey)
+            }
+          }
+        }
+      }
+
       Item {
         width: parent.width
         height: Style.space(440)
@@ -216,7 +309,7 @@ Panel {
         Text {
           visible: appModel.count === 0
           anchors.centerIn: parent
-          text: root.appLibrary ? "No installed apps match" : "Loading installed apps…"
+          text: root.emptyMessage()
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
