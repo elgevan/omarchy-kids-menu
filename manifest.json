@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.elgevan.kids-mode",
-  "name": "Omarchy Kids Mode",
-  "version": "0.15.6",
+  "id": "io.github.elgevan.kids-menu",
+  "name": "Kids Menu",
+  "version": "0.15.7",
   "author": "elgevan",
   "license": "MIT",
   "description": "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile.",
@@ -18,8 +18,8 @@
     "service": "Service.qml"
   },
   "barWidget": {
-    "displayName": "Kids Mode",
-    "description": "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Mode is active.",
+    "displayName": "Kids Menu",
+    "description": "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Menu is active.",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left"

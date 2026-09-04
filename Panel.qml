@@ -4,8 +4,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "io.github.elgevan.kids-mode.manager"
-  ipcTarget: "io.github.elgevan.kids-mode.manager"
+  moduleName: "io.github.elgevan.kids-menu.manager"
+  ipcTarget: "io.github.elgevan.kids-menu.manager"
 
   property var anchorItem: null
   property var hostWidget: null
@@ -154,20 +154,20 @@ Panel {
   }
 
   function modeActionLabel() {
-    if (root.modePhase === "entering") return "PREPARING KIDS MODE…"
+    if (root.modePhase === "entering") return "PREPARING KIDS MENU…"
     if (root.modePhase === "exiting" || root.modePhase === "rollback")
       return "RESTORING DESKTOP…"
     if (root.modePhase === "error") return "AUTHENTICATE & RESTORE"
-    if (root.modePhase === "active") return "EXIT KIDS MODE"
-    return "START KIDS MODE"
+    if (root.modePhase === "active") return "EXIT KIDS MENU"
+    return "START KIDS MENU"
   }
 
   function modeActionDetail() {
     if (root.modePhase === "entering") return "Checking windows, shortcuts, shell, and notifications"
     if (root.modePhase === "exiting" || root.modePhase === "rollback")
-      return "Kids Mode stays active until your desktop is restored"
+      return "Kids Menu stays active until your desktop is restored"
     if (root.modePhase === "error")
-      return "Kids Mode is still active; authenticate before restoring"
+      return "Kids Menu is still active; authenticate before restoring"
     if (root.modePhase === "active") {
       return root.service.hiddenWindowCount > 0
         ? "Use your password or fingerprint to restore " + root.service.hiddenWindowCount + " windows"
@@ -218,7 +218,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: "KIDS MODE"
+            text: "KIDS MENU"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.title

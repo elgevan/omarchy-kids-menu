@@ -17,7 +17,7 @@ Loader {
 
   readonly property var sourceAppLibrary: shell ? shell.appLibrary : null
   readonly property var allowlistService: shell && typeof shell.serviceFor === "function"
-    ? shell.serviceFor("io.github.elgevan.kids-mode")
+    ? shell.serviceFor("io.github.elgevan.kids-menu")
     : null
   readonly property bool kidsModeEnabled: root.allowlistService
     ? root.allowlistService.kidsModeEnabled === true
@@ -82,7 +82,7 @@ Loader {
         entry ? entry.command : [],
         entry ? entry.execString : ""
       )
-      // Browser entries and Omarchy web apps launched from Kids Mode all use
+      // Browser entries and Omarchy web apps launched from Kids Menu all use
       // one persistent, login-free Chromium profile. This prevents a web-app
       // shortcut such as YouTube from falling through to the adult profile.
       if (KidsBrowser.isBrowser(desktopId) || webAppUrl) {
@@ -103,7 +103,7 @@ Loader {
 
     function remove(desktopId, name) {
       if (root.shell)
-        Quickshell.execDetached(["omarchy-notification-send", "Choose apps from the Kids Mode icon on the bar."])
+        Quickshell.execDetached(["omarchy-notification-send", "Choose apps from the Kids Menu icon on the bar."])
     }
   }
 

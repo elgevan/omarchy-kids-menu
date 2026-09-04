@@ -24,7 +24,7 @@
     "mapped": true,
     "workspace": {"name": "1"},
     "class": "omawrite",
-    "title": "Kids Mode note",
+    "title": "Kids Menu note",
     "pinned": false,
     "floating": false,
     "fullscreen": 0
@@ -44,7 +44,7 @@
     "mapped": true,
     "workspace": {"name": "other"},
     "class": "misdirected",
-    "title": "Misdirected Kids Mode window",
+    "title": "Misdirected Kids Menu window",
     "pinned": false,
     "floating": false,
     "fullscreen": 0

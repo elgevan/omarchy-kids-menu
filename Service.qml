@@ -11,7 +11,7 @@ import "WindowAdmission.js" as WindowAdmission
 
 // Shared state for the menu and its bar-panel editor. The service reads
 // DesktopEntries, writes plugin-owned state, and temporarily enables Omarchy's
-// built-in Do Not Disturb mode while Kids Mode is active.
+// built-in Do Not Disturb mode while Kids Menu is active.
 Item {
   id: root
 
@@ -86,7 +86,7 @@ Item {
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
-    : "io.github.elgevan.kids-mode"
+    : "io.github.elgevan.kids-menu"
   readonly property string managerWidgetId: pluginId + ".manager"
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
@@ -217,7 +217,7 @@ Item {
     if (root.modeStateRecoveryPending) return
 
     // Persisted state records recovery intent; they are not an unauthenticated
-    // command channel for releasing an active Kids Mode session.
+    // command channel for releasing an active Kids Menu session.
     if (enabled === true && !root.kidsModeEnabled && root.modePhase === "inactive")
       root.beginActivation()
     else if (enabled !== true && root.kidsModeEnabled)
@@ -255,7 +255,7 @@ Item {
     var result = root.parseWindowSessionOutput(output)
     var status = result ? String(result.status || "") : ""
     if (exitCode !== 0 || !result || !status || status === "unavailable") {
-      root.failModeStateRecovery("Could not verify saved Kids Mode state")
+      root.failModeStateRecovery("Could not verify saved Kids Menu state")
       return
     }
 
@@ -293,7 +293,7 @@ Item {
     root.modeStateRecoveryPending = false
     root.modeStateRecoveryFailed = true
     root.errorRecoveryKind = "state-probe"
-    root.modeTransitionError = message || "Could not verify saved Kids Mode state"
+    root.modeTransitionError = message || "Could not verify saved Kids Menu state"
     root.modePhase = "error"
     root.modeEffectsDesired = true
     root.windowSessionDesired = true
@@ -385,7 +385,7 @@ Item {
 
   function abortPendingActivation(message) {
     if (root.modePhase !== "entering" || !root.activationWaitingForTools) return
-    root.modeTransitionError = message || "Could not start Kids Mode"
+    root.modeTransitionError = message || "Could not start Kids Menu"
     root.activationWaitingForTools = false
     root.modeEffectsDesired = false
     root.windowSessionDesired = false
@@ -425,7 +425,7 @@ Item {
 
   function rollbackActivation(message) {
     if (root.modePhase !== "entering") return
-    root.modeTransitionError = message || "Could not start Kids Mode"
+    root.modeTransitionError = message || "Could not start Kids Menu"
     root.activationWaitingForTools = false
     root.modePhase = "rollback"
     root.controlReleaseStarted = false
@@ -503,7 +503,7 @@ Item {
 
   function failActiveMode(message) {
     if (root.modePhase !== "active" && root.modePhase !== "error") return
-    root.modeTransitionError = message || "Kids Mode protection needs attention"
+    root.modeTransitionError = message || "Kids Menu protection needs attention"
     root.errorRecoveryKind = "protection-failure"
     root.modePhase = "error"
     root.modeEffectsDesired = true
@@ -968,7 +968,7 @@ Item {
     // persistShellConfig updates shell.json and shell.barConfig immediately,
     // but an already-mounted bar can miss that change while plugin registry
     // updates are happening in the same turn. Push the new object into the
-    // live bar explicitly so Kids Mode never leaves stale widgets on screen.
+    // live bar explicitly so Kids Menu never leaves stale widgets on screen.
     if ("barConfig" in liveBar) liveBar.barConfig = root.shell.barConfig
     if (typeof liveBar.applyBarConfig === "function") liveBar.applyBarConfig()
   }
@@ -999,7 +999,7 @@ Item {
 
     // FileView reloads and other plugin writes can arrive just after the
     // initial mutation. Treat the settled shell config as authoritative and
-    // reapply Kids Mode instead of leaving an unrestricted bar on screen.
+    // reapply Kids Menu instead of leaving an unrestricted bar on screen.
     root.shellPolicySynced = false
     root.shellModeApplied = false
     root.scheduleShellIntegration()
@@ -1013,7 +1013,7 @@ Item {
 
     try {
       // Close every currently open plugin surface that is not part of the
-      // Kids Mode allowlist before disabling it in shell.json.
+      // Kids Menu allowlist before disabling it in shell.json.
       var installedPlugins = root.pluginRegistry
         ? root.pluginRegistry.installedPlugins
         : null
@@ -1123,13 +1123,13 @@ Item {
         root.prepareRuntimeTools()
       } else if (root.modePhase === "entering") {
         if (root.activationWaitingForTools)
-          root.abortPendingActivation("Could not prepare Kids Mode state directories")
+          root.abortPendingActivation("Could not prepare Kids Menu state directories")
         else
-          root.rollbackActivation("Could not prepare Kids Mode state directories")
+          root.rollbackActivation("Could not prepare Kids Menu state directories")
       } else if (root.modeStateRecoveryPending) {
-        root.failModeStateRecovery("Could not prepare Kids Mode state directories")
+        root.failModeStateRecovery("Could not prepare Kids Menu state directories")
       } else if (root.modePhase === "active" || root.modePhase === "error") {
-        root.failActiveMode("Could not prepare Kids Mode state directories")
+        root.failActiveMode("Could not prepare Kids Menu state directories")
       }
     }
   }
@@ -1207,7 +1207,7 @@ Item {
       } else if (Number(result.blocked || 0) > 0) {
         Quickshell.execDetached([
           "omarchy-notification-send",
-          "A window not approved for Kids Mode remains hidden."
+          "A window not approved for Kids Menu remains hidden."
         ])
       }
 
@@ -1277,7 +1277,7 @@ Item {
         if (root.modePhase === "entering")
           root.rollbackActivation("Could not update the Omarchy shell")
         else if (root.modePhase === "active")
-          root.failActiveMode("Could not maintain the Kids Mode shell")
+          root.failActiveMode("Could not maintain the Kids Menu shell")
         else if (root.modePhase === "exiting" || root.modePhase === "rollback")
           root.failDeactivation("Could not restore the Omarchy shell")
       }

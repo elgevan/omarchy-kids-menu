@@ -293,7 +293,7 @@ function ensureManager(config, managerId, managerPath) {
   right.splice(insertAt, 0, managerEntry(managerId, managerPath))
 }
 
-// Replace the stock menu's bar slot while the plugin is enabled. In Kids Mode,
+// Replace the stock menu's bar slot while the plugin is enabled. In Kids Menu,
 // also replace the rest of the bar with the small controls allowlist. Both
 // restore records travel with the plugin entry so a shell reload cannot lose
 // the user's exact normal layout or the stock menu's original slot.
@@ -349,7 +349,7 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled, ins
     restoreBarLayout(config, barRestore, pluginId)
     ensureManager(config, managerId, managerPath)
   }
-  // Outside Kids Mode, leave the user's disabled-plugin preferences intact.
+  // Outside Kids Menu, leave the user's disabled-plugin preferences intact.
   return {
     restore: restore,
     barRestore: kidsModeEnabled === true ? barRestore : null

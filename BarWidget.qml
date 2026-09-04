@@ -6,11 +6,11 @@ import "BarActions.js" as BarActions
 // permanent ID. Service.qml moves this widget into the stock menu's bar slot.
 BarWidget {
   id: root
-  moduleName: "io.github.elgevan.kids-mode"
+  moduleName: "io.github.elgevan.kids-menu"
 
   readonly property var allowlistService: root.bar && root.bar.shell
     && typeof root.bar.shell.serviceFor === "function"
-    ? root.bar.shell.serviceFor("io.github.elgevan.kids-mode")
+    ? root.bar.shell.serviceFor("io.github.elgevan.kids-menu")
     : null
   readonly property bool kidsModeEnabled: root.allowlistService
     ? root.allowlistService.kidsModeEnabled === true

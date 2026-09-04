@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 umask 077
 
-PLUGIN_ID=io.github.elgevan.kids-mode
+PLUGIN_ID=io.github.elgevan.kids-menu
 HYPRCTL_BIN=${OMARCHY_KIDS_HYPRCTL:-hyprctl}
 RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
 STATE_DIR=$RUNTIME_ROOT/omarchy-kids
@@ -195,7 +195,7 @@ fi
 if jq -e 'any(.[]; (.submap_universal // false) == true)' \
     <<<"$bindings_json" >/dev/null; then
   json_result enter false 0 false \
-    "A universal Hyprland binding can bypass the Kids Mode shortcut policy"
+    "A universal Hyprland binding can bypass the Kids Menu shortcut policy"
   exit 1
 fi
 
@@ -238,30 +238,30 @@ append_lua() {
 }
 
 # Plugin-owned entry points.
-append_lua "  hl.bind(\"SUPER + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"root\"}']]), { description = \"Kids Mode: Menu\" })"
-append_lua "  hl.bind(\"SUPER + ALT + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"apps\"}']]), { description = \"Kids Mode: Apps\" })"
-append_lua "  hl.bind(\"SUPER + CTRL + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.background\"}']]), { description = \"Kids Mode: Background\" })"
-append_lua "  hl.bind(\"SUPER + SHIFT + CTRL + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.theme\"}']]), { description = \"Kids Mode: Theme\" })"
+append_lua "  hl.bind(\"SUPER + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"root\"}']]), { description = \"Kids Menu: Menu\" })"
+append_lua "  hl.bind(\"SUPER + ALT + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"apps\"}']]), { description = \"Kids Menu: Apps\" })"
+append_lua "  hl.bind(\"SUPER + CTRL + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.background\"}']]), { description = \"Kids Menu: Background\" })"
+append_lua "  hl.bind(\"SUPER + SHIFT + CTRL + SPACE\", hl.dsp.exec_cmd([[omarchy-shell shell toggle $PLUGIN_ID '{\"menu\":\"style.theme\"}']]), { description = \"Kids Menu: Theme\" })"
 
 if [[ $browser_allowed == true ]]; then
-  append_lua "  hl.bind(\"SUPER + SHIFT + RETURN\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchKidsBrowser '{}']]), { description = \"Kids Mode: Browser\" })"
-  append_lua "  hl.bind(\"SUPER + SHIFT + B\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchKidsBrowser '{}']]), { description = \"Kids Mode: Browser\" })"
+  append_lua "  hl.bind(\"SUPER + SHIFT + RETURN\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchKidsBrowser '{}']]), { description = \"Kids Menu: Browser\" })"
+  append_lua "  hl.bind(\"SUPER + SHIFT + B\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchKidsBrowser '{}']]), { description = \"Kids Menu: Browser\" })"
 fi
 if [[ $omawrite_allowed == true ]]; then
-  append_lua "  hl.bind(\"SUPER + SHIFT + W\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omawrite\",\"name\":\"Omawrite\"}']]), { description = \"Kids Mode: Omawrite\" })"
+  append_lua "  hl.bind(\"SUPER + SHIFT + W\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omawrite\",\"name\":\"Omawrite\"}']]), { description = \"Kids Menu: Omawrite\" })"
 fi
 if [[ $omacalc_allowed == true ]]; then
-  append_lua "  hl.bind(\"SUPER + CTRL + Q\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Mode: Calculator\" })"
-  append_lua "  hl.bind(\"XF86Calculator\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Mode: Calculator\" })"
+  append_lua "  hl.bind(\"SUPER + CTRL + Q\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Menu: Calculator\" })"
+  append_lua "  hl.bind(\"XF86Calculator\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Menu: Calculator\" })"
 fi
 
-# Numbered workspaces remain useful for separating Kids Mode apps. The parent's
+# Numbered workspaces remain useful for separating Kids Menu apps. The parent's
 # original windows stay parked on the private workspace and the session cleanup
 # closes Kids-launched windows from every workspace before restoring them.
 for workspace in {1..10}; do
   key_code=$((workspace + 9))
-  append_lua "  hl.bind(\"SUPER + code:$key_code\", hl.dsp.focus({ workspace = \"$workspace\" }), { description = \"Kids Mode: Workspace $workspace\" })"
-  append_lua "  hl.bind(\"SUPER + SHIFT + code:$key_code\", hl.dsp.window.move({ workspace = \"$workspace\" }), { description = \"Kids Mode: Move to workspace $workspace\" })"
+  append_lua "  hl.bind(\"SUPER + code:$key_code\", hl.dsp.focus({ workspace = \"$workspace\" }), { description = \"Kids Menu: Workspace $workspace\" })"
+  append_lua "  hl.bind(\"SUPER + SHIFT + code:$key_code\", hl.dsp.window.move({ workspace = \"$workspace\" }), { description = \"Kids Menu: Move to workspace $workspace\" })"
 done
 
 # Everyday window controls that do not expose other applications.
@@ -300,7 +300,7 @@ append_lua '  hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd("omarchy-hyprland
 lua_program="$lua_program
 end)
 hl.dispatch(hl.dsp.submap(\"omarchy-kids\"))
-assert(hl.get_current_submap() == \"omarchy-kids\", \"Kids Mode submap did not activate\")"
+assert(hl.get_current_submap() == \"omarchy-kids\", \"Kids Menu submap did not activate\")"
 
 # Mark ownership before applying. If the shell disappears mid-transition, the
 # next service instance knows to reload the real configuration before retrying.
@@ -315,7 +315,7 @@ if ! error=$($HYPRCTL_BIN eval "$lua_program" 2>&1); then
     restore_error="; automatic restore also failed: $restore_error"
   fi
   json_result enter false "$changed" false \
-    "Could not apply Kids Mode shortcuts: $error$restore_error"
+    "Could not apply Kids Menu shortcuts: $error$restore_error"
   exit 1
 fi
 

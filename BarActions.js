@@ -1,4 +1,4 @@
-var PLUGIN_ID = "io.github.elgevan.kids-mode"
+var PLUGIN_ID = "io.github.elgevan.kids-menu"
 
 function menuRoute(kidsModeEnabled) {
   return kidsModeEnabled === true ? "apps" : "root"

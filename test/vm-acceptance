@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-PLUGIN_ID=io.github.elgevan.kids-mode
+PLUGIN_ID=io.github.elgevan.kids-menu
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
 MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
@@ -374,7 +374,7 @@ omarchy restart shell
 wait_until "standalone kids plugin becomes active" 20 plugin_enabled
 wait_until "normal Omarchy menu symbol remains on the left" 20 menu_symbol_on_left
 wait_until "separate Kids manager appears on the right" 20 manager_on_right
-wait_until "Kids Mode starts inactive" 20 mode_is off
+wait_until "Kids Menu starts inactive" 20 mode_is off
 wait_until "inactive mode preserves the prior DND state" 20 dnd_is "$dnd_before"
 wait_until "inactive mode leaves the stock menu available" 20 stock_menu_available
 wait_until "inactive mode leaves the stock menu shortcut intact" 20 \
@@ -390,7 +390,7 @@ original_monitor=$(hyprctl -j activeworkspace | jq -r '.monitor // ""')
 adult_title=OmarchyKidsAdultVisibilityTest
 uwsm-app -- foot --title="$adult_title" sh -c 'printf "ADULT SESSION MUST STAY HIDDEN\n"; sleep 3600' \
   >/dev/null 2>&1 &
-wait_until "adult visibility-test window opens before Kids Mode" 15 \
+wait_until "adult visibility-test window opens before Kids Menu" 15 \
   client_address_with_title "$adult_title"
 adult_address=$(client_address_with_title "$adult_title")
 adult_second_title=OmarchyKidsAdultOrderTest
@@ -405,61 +405,61 @@ hyprctl -j clients | jq --arg first "$adult_address" --arg second "$adult_second
   > "$ARTIFACTS/adult-positions.json"
 
 omarchy-shell "$MANAGER_ID" show
-wait_until "Kids Mode manager opens for first-run activation" 15 screen_contains "KIDS MODE"
+wait_until "Kids Menu manager opens for first-run activation" 15 screen_contains "KIDS MENU"
 wtype -M ctrl -M shift -k k -m shift -m ctrl
-wait_until "Kids Mode activates explicitly" 20 mode_is on
-wait_until "Kids Mode starts on numbered workspace 1" 20 active_context_is "1" ""
+wait_until "Kids Menu activates explicitly" 20 mode_is on
+wait_until "Kids Menu starts on numbered workspace 1" 20 active_context_is "1" ""
 omarchy-shell "$MANAGER_ID" hide
 wait_until "adult workspace is hidden on every monitor" 15 private_workspaces_hidden
 hyprctl dispatch 'hl.dsp.workspace.toggle_special("omarchy-kids-parent")' >/dev/null
 wait_until "a revealed adult workspace is closed by the guard" 15 private_workspaces_hidden
 lock_is false || fail "visibility recovery unexpectedly locked the desktop"
-wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
-wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
-wait_until "Kids Mode limits the bar to child-safe controls" 20 kids_bar_is_limited
+wait_until "kids menu enables Do Not Disturb" 20 dnd_is on
+wait_until "Kids Menu blocks the unrestricted stock menu" 20 stock_menu_blocked
+wait_until "Kids Menu limits the bar to child-safe controls" 20 kids_bar_is_limited
 wait_until "the live bar renders only child-safe controls" 20 visible_kids_bar_is_limited
-wait_until "Kids Mode disables every other visible plugin" 20 kids_plugins_are_limited
-wait_until "Kids Mode redirects the normal menu shortcut" 20 \
-  binding_description_present "Kids Mode: Menu"
-wait_until "Kids Mode redirects the Apps shortcut" 20 \
-  binding_description_present "Kids Mode: Apps"
-wait_until "Kids Mode redirects browser shortcuts" 20 \
-  binding_description_present "Kids Mode: Browser"
-wait_until "Kids Mode keeps numbered workspace shortcuts" 20 \
-  binding_descriptions_present "Kids Mode: Workspace 1" "Kids Mode: Workspace 10"
-wait_until "Kids Mode can move windows among numbered workspaces" 20 \
+wait_until "Kids Menu disables every other visible plugin" 20 kids_plugins_are_limited
+wait_until "Kids Menu redirects the normal menu shortcut" 20 \
+  binding_description_present "Kids Menu: Menu"
+wait_until "Kids Menu redirects the Apps shortcut" 20 \
+  binding_description_present "Kids Menu: Apps"
+wait_until "Kids Menu redirects browser shortcuts" 20 \
+  binding_description_present "Kids Menu: Browser"
+wait_until "Kids Menu keeps numbered workspace shortcuts" 20 \
+  binding_descriptions_present "Kids Menu: Workspace 1" "Kids Menu: Workspace 10"
+wait_until "Kids Menu can move windows among numbered workspaces" 20 \
   binding_descriptions_present \
-    "Kids Mode: Move to workspace 1" "Kids Mode: Move to workspace 10"
-wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
+    "Kids Menu: Move to workspace 1" "Kids Menu: Move to workspace 10"
+wait_until "Kids Menu blocks the stock terminal shortcut" 20 \
   binding_description_absent "Terminal"
 terminal_clients_before=$(hyprctl -j clients | jq -c '[.[].address] | sort')
 wtype -M logo -k Return -m logo
 sleep 2
 terminal_clients_after=$(hyprctl -j clients | jq -c '[.[].address] | sort')
 [[ $terminal_clients_after == "$terminal_clients_before" ]] \
-  || fail "the stock terminal shortcut opened a window in Kids Mode"
-pass "the stock terminal shortcut cannot open a window in Kids Mode"
-wait_until "Kids Mode blocks the DND bypass shortcut" 20 \
+  || fail "the stock terminal shortcut opened a window in Kids Menu"
+pass "the stock terminal shortcut cannot open a window in Kids Menu"
+wait_until "Kids Menu blocks the DND bypass shortcut" 20 \
   binding_description_absent "Toggle silencing notifications"
-wait_until "Kids Mode blocks numbered right-side panel shortcuts" 20 \
+wait_until "Kids Menu blocks numbered right-side panel shortcuts" 20 \
   binding_descriptions_absent \
     "Bar panel 1" "Bar panel 2" "Bar panel 3" \
     "Bar panel 4" "Bar panel 5" "Bar panel 6" \
     "Bar panel 7" "Bar panel 8" "Bar panel 9"
-wait_until "Kids Mode blocks the close-all shortcut" 20 \
+wait_until "Kids Menu blocks the close-all shortcut" 20 \
   binding_description_absent "Close all windows"
-wait_until "Kids Mode blocks laptop display toggles" 20 \
+wait_until "Kids Menu blocks laptop display toggles" 20 \
   binding_descriptions_absent \
     "Toggle laptop display" "Toggle laptop display mirroring"
-wait_until "Kids Mode blocks persistent monitor scaling" 20 \
+wait_until "Kids Menu blocks persistent monitor scaling" 20 \
   binding_descriptions_absent "Monitor scaling up" "Monitor scaling down"
-wait_until "Kids Mode blocks touchpad toggles" 20 \
+wait_until "Kids Menu blocks touchpad toggles" 20 \
   binding_descriptions_absent \
     "Toggle touchpad" "Disable touchpad" "Enable touchpad"
-binding_description_present "Kids Mode: Omawrite" \
+binding_description_present "Kids Menu: Omawrite" \
   || fail "selected Omawrite shortcut is not guarded"
 pass "selected Omawrite shortcut is guarded"
-binding_description_present "Kids Mode: Calculator" \
+binding_description_present "Kids Menu: Calculator" \
   || fail "selected Omacalc shortcut is not guarded"
 pass "selected Omacalc shortcut is guarded"
 [[ -f $SHORTCUT_MARKER ]] || fail "transient shortcut ownership marker is missing"
@@ -489,38 +489,38 @@ printf '{malformed-mode-state\n' > "$MODE_STATE"
 omarchy restart shell
 wait_until "malformed mode state reconstructs as active from durable ownership" 25 \
   mode_is on
-wait_until "reconstructed Kids Mode keeps the adult window session private" 20 \
+wait_until "reconstructed Kids Menu keeps the adult window session private" 20 \
   jq -e '.active == true' \
   "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/windows.json"
-wait_until "reconstructed Kids Mode keeps the restricted shortcut layer" 20 \
-  binding_description_present "Kids Mode: Menu"
-wait_until "reconstructed Kids Mode keeps the stock menu blocked" 20 \
+wait_until "reconstructed Kids Menu keeps the restricted shortcut layer" 20 \
+  binding_description_present "Kids Menu: Menu"
+wait_until "reconstructed Kids Menu keeps the stock menu blocked" 20 \
   stock_menu_blocked
-wait_until "reconstructed Kids Mode keeps notifications muted" 20 dnd_is on
+wait_until "reconstructed Kids Menu keeps notifications muted" 20 dnd_is on
 
 locked_allowlist_hash=$(sha256sum "$ALLOWLIST" | awk '{print $1}')
 omarchy-shell "$MANAGER_ID" show
 wait_until "active manager omits the redundant availability summary" 15 \
   screen_lacks "apps available"
 wait_until "active manager omits the redundant edit hint" 15 \
-  screen_lacks "Exit Kids Mode to change available apps"
+  screen_lacks "Exit Kids Menu to change available apps"
 wtype -k Return
 sleep 1
 allowlist_hash_is "$locked_allowlist_hash" \
-  || fail "app selection changed while Kids Mode was active"
-pass "app selection is read-only while Kids Mode is active"
+  || fail "app selection changed while Kids Menu was active"
+pass "app selection is read-only while Kids Menu is active"
 omarchy-shell "$MANAGER_ID" hide
 
 [[ $(omarchy-shell shell call "$PLUGIN_ID" ping '{}') == ok ]] \
-  || fail "Kids Mode menu answers its standalone IPC"
-pass "Kids Mode menu answers its standalone IPC"
-[[ $(omarchy menu ping) == unknown ]] || fail "stock menu IPC is unavailable in Kids Mode"
-pass "stock menu IPC is unavailable in Kids Mode"
+  || fail "Kids Menu answers its standalone IPC"
+pass "Kids Menu answers its standalone IPC"
+[[ $(omarchy menu ping) == unknown ]] || fail "stock menu IPC is unavailable in Kids Menu"
+pass "stock menu IPC is unavailable in Kids Menu"
 
-notify-send -a "Kids Mode Acceptance" "Hidden in Kids Mode"
+notify-send -a "Kids Menu Acceptance" "Hidden in Kids Menu"
 sleep 1
-screen_lacks "Hidden in Kids Mode" || fail "ordinary notification is suppressed in kids mode"
-pass "ordinary notification is suppressed in kids mode"
+screen_lacks "Hidden in Kids Menu" || fail "ordinary notification is suppressed in kids menu"
+pass "ordinary notification is suppressed in kids menu"
 
 installed="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 omarchy plugin validate "$installed"
@@ -615,9 +615,9 @@ pass "installed app handling remains filter-only"
 
 if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   omarchy-shell "$MANAGER_ID" show
-  wait_until "Kids Mode manager opens" 15 screen_contains "KIDS MODE"
+  wait_until "Kids Menu manager opens" 15 screen_contains "KIDS MENU"
   wtype -M ctrl -M shift -k k -m shift -m ctrl
-  wait_until "turning Kids Mode off opens authentication" 15 lock_is true
+  wait_until "turning Kids Menu off opens authentication" 15 lock_is true
   wait_until "mode stays on before authentication" 15 mode_is on
 
   fingerprint=$(omarchy-shell lock status | jq -r '.fingerprint')
@@ -625,13 +625,13 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
     wtype __omarchy_kids_invalid_password__ -s 750 -k Return
     sleep 2
     lock_is true || fail "wrong password keeps the session locked"
-    mode_is on || fail "wrong password keeps Kids Mode on"
-    pass "wrong password keeps Kids Mode on"
+    mode_is on || fail "wrong password keeps Kids Menu on"
+    pass "wrong password keeps Kids Menu on"
   fi
 
   wtype "$OMARCHY_KIDS_TEST_PASSWORD" -s 750 -k Return
   wait_until "valid authentication unlocks the session" 20 lock_is false
-  wait_until "valid authentication turns Kids Mode off" 20 mode_is off
+  wait_until "valid authentication turns Kids Menu off" 20 mode_is off
   wait_until "internal Off restores the original workspace and monitor" 20 \
     active_context_is "$original_workspace" "$original_monitor"
   wait_until "internal Off restores both adult windows to their original positions" 20 adult_positions_restored
@@ -654,9 +654,9 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
       "Bar panel 1" "Close all windows" "Toggle laptop display" \
       "Monitor scaling up" "Toggle touchpad"
   wait_until "internal Off removes the transient shortcut layer" 20 \
-    binding_description_absent "Kids Mode: Menu"
-  manager_on_right || fail "Kids Mode manager remains available while off"
-  pass "Kids Mode manager remains available while off"
+    binding_description_absent "Kids Menu: Menu"
+  manager_on_right || fail "Kids Menu manager remains available while off"
+  pass "Kids Menu manager remains available while off"
 
   omarchy menu summon root >/dev/null
   wait_until "internal Off opens the normal menu" 15 layer_present
@@ -673,7 +673,7 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "standalone normal menu closes while off" 15 layer_absent
 
   omarchy-shell "$MANAGER_ID" show
-  wait_until "Kids Mode manager reopens while off" 15 screen_contains "KIDS MODE"
+  wait_until "Kids Menu manager reopens while off" 15 screen_contains "KIDS MENU"
   wait_until "inactive manager omits the redundant normal-mode status" 15 \
     screen_lacks "Normal Omarchy menu active"
   wait_until "inactive manager omits the redundant persistence hint" 15 \
@@ -689,16 +689,16 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "acceptance allowlist is restored after editability check" 15 \
     allowlist_hash_is "$editable_allowlist_hash"
   wtype -M ctrl -M shift -k k -m shift -m ctrl
-  wait_until "turning Kids Mode on is immediate" 15 mode_is on
-  wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
-  wait_until "turning Kids Mode on blocks stock menu IPC again" 15 stock_menu_blocked
-  wait_until "turning Kids Mode on limits the bar again" 15 kids_bar_is_limited
-  wait_until "turning Kids Mode on disables other visible plugins again" 15 \
+  wait_until "turning Kids Menu on is immediate" 15 mode_is on
+  wait_until "turning Kids Menu on remutes notifications" 15 dnd_is on
+  wait_until "turning Kids Menu on blocks stock menu IPC again" 15 stock_menu_blocked
+  wait_until "turning Kids Menu on limits the bar again" 15 kids_bar_is_limited
+  wait_until "turning Kids Menu on disables other visible plugins again" 15 \
     kids_plugins_are_limited
-  wait_until "turning Kids Mode on reapplies shortcut filtering" 15 \
-    binding_description_present "Kids Mode: Menu"
-  lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
-  pass "turning Kids Mode on does not request authentication"
+  wait_until "turning Kids Menu on reapplies shortcut filtering" 15 \
+    binding_description_present "Kids Menu: Menu"
+  lock_is false || fail "turning Kids Menu on unexpectedly requested authentication"
+  pass "turning Kids Menu on does not request authentication"
   omarchy-shell "$MANAGER_ID" hide
   if desktop_present YouTube && command -v chromium >/dev/null; then
     kids_menu_summon apps >/dev/null
@@ -742,7 +742,7 @@ wait_until "direct removal restores desktop-state shortcuts" 20 \
     "Bar panel 1" "Close all windows" "Toggle laptop display" \
     "Monitor scaling up" "Toggle touchpad"
 wait_until "direct removal removes Kids shortcut bindings" 20 \
-  binding_description_absent "Kids Mode: Menu"
+  binding_description_absent "Kids Menu: Menu"
 if [[ -n $removal_kids_address ]]; then
   wait_until "direct removal closes the Kids-launched app" 20 \
     client_absent "$removal_kids_address"
@@ -763,4 +763,4 @@ trap - EXIT
 cleanup
 hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_address\" })" >/dev/null
 hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_second_address\" })" >/dev/null
-pass "Omarchy Kids Mode VM acceptance passed"
+pass "Kids Menu VM acceptance passed"

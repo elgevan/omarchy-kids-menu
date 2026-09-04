@@ -1,6 +1,6 @@
-# Omarchy Kids Mode
+# Kids Menu
 
-![Omarchy Kids Mode](preview.png)
+![Kids Menu](preview.png)
 
 When Kids Menu is on, a child sees only the apps you choose. Your windows are
 hidden, shortcuts to other apps and settings are paused, and Chromium and
@@ -18,15 +18,15 @@ omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
 
 1. Click the Kids Menu plugin icon.
 2. Choose the apps the child can use.
-3. Click **Start Kids Mode**.
+3. Click **Start Kids Menu**.
 
 The Omarchy icon and `Super + Space` now open only the selected apps. When
-finished, open the Kids Menu plugin and click **Exit Kids Mode**. Omarchy asks
+finished, open the Kids Menu plugin and click **Exit Kids Menu**. Omarchy asks
 for your password or fingerprint and restores your desktop as it was.
 
-Starting Kids Mode temporarily updates the Omarchy shell layout, notification
+Starting Kids Menu temporarily updates the Omarchy shell layout, notification
 state, and Hyprland session state. The plugin records the previous values before
-applying those changes and restores them when Kids Mode ends.
+applying those changes and restores them when Kids Menu ends.
 
 The separate browser profile is kept between sessions at:
 
@@ -34,22 +34,22 @@ The separate browser profile is kept between sessions at:
 ~/.local/share/omarchy-kids/chromium
 ```
 
-Other browsers and apps use their normal profiles. Kids Mode does not filter
+Other browsers and apps use their normal profiles. Kids Menu does not filter
 websites and is not a replacement for a separate Linux user or parental
 controls. It is intended for supervised use. The exit check prevents accidental
 access, but software running as the same Linux user can still change the plugin's files or turn it off.
 
 ## Remove
 
-Exit Kids Mode, then run:
+Exit Kids Menu, then run:
 
 ```bash
-omarchy plugin remove io.github.elgevan.kids-mode
+omarchy plugin remove io.github.elgevan.kids-menu
 ```
 
 Your app list and browser profile are kept in case you reinstall the plugin.
 
-To also delete all saved Kids Mode data, including the app list, browser
+To also delete all saved Kids Menu data, including the app list, browser
 history, bookmarks, settings, sign-ins, and internal recovery state, run:
 
 ```bash

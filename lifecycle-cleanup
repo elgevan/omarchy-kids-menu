@@ -33,9 +33,9 @@ done
 # Keep the failed window snapshot for a later recovery attempt, but do not leave
 # plugin-owned shortcut restrictions active after the plugin itself is gone.
 if "$SHORTCUT_POLICY" exit >/dev/null; then
-  printf 'Kids Mode removal could not restore every window; shortcut restrictions were released.\n' >&2
+  printf 'Kids Menu removal could not restore every window; shortcut restrictions were released.\n' >&2
 else
-  printf 'Kids Mode removal could not restore windows or shortcuts; see shortcut-restore.json for details.\n' >&2
+  printf 'Kids Menu removal could not restore windows or shortcuts; see shortcut-restore.json for details.\n' >&2
 fi
 
 exit 1

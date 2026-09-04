@@ -37,28 +37,28 @@ rm -rf -- "$runtime_fallback_test_dir"
 [[ -f $PLUGIN_ROOT/LICENSE ]] || fail "repository license is missing"
 
 rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'omarchy plugin remove io.github.elgevan.kids-mode' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'omarchy plugin remove io.github.elgevan.kids-menu' "$PLUGIN_ROOT/README.md" \
   || fail "README does not include standard plugin removal instructions"
 
 jq -e '
   .schemaVersion == 1 and
-  .id == "io.github.elgevan.kids-mode" and
-  .name == "Omarchy Kids Mode" and
-  .version == "0.15.6" and
+  .id == "io.github.elgevan.kids-menu" and
+  .name == "Kids Menu" and
+  .version == "0.15.7" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
   .entryPoints.service == "Service.qml" and
-  .barWidget.displayName == "Kids Mode" and
-  .barWidget.description == "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Mode is active." and
+  .barWidget.displayName == "Kids Menu" and
+  .barWidget.description == "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Menu is active." and
   (.omarchy? == null)
 ' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
 
 rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'Starting Kids Mode temporarily updates the Omarchy shell layout' \
+  && rg -Fq 'Starting Kids Menu temporarily updates the Omarchy shell layout' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
@@ -67,7 +67,7 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
   || fail "README does not document the authentication boundary and runtime integrations"
 
-jq -e . "$MENU" >/dev/null || fail "Kids Mode menu is not valid JSONC/JSON"
+jq -e . "$MENU" >/dev/null || fail "Kids Menu configuration is not valid JSONC/JSON"
 jq -e 'keys | length == 0' "$EMPTY_MENU" >/dev/null || fail "menu extension guard is not empty"
 
 jq -e '
@@ -161,7 +161,7 @@ const assert = require("node:assert/strict")
 const actions = require(process.argv[2])
 
 const pluginCommand = route =>
-  `omarchy-shell shell toggle io.github.elgevan.kids-mode '{"menu":"${route}"}'`
+  `omarchy-shell shell toggle io.github.elgevan.kids-menu '{"menu":"${route}"}'`
 
 assert.equal(actions.menuRoute(false), "root")
 assert.equal(actions.menuRoute(true), "apps")
@@ -175,7 +175,7 @@ node - "$PLUGIN_ROOT/ShellIntegration.js" <<'NODE'
 const assert = require("node:assert/strict")
 const integration = require(process.argv[2])
 
-const pluginId = "io.github.elgevan.kids-mode"
+const pluginId = "io.github.elgevan.kids-menu"
 const managerId = pluginId + ".manager"
 const managerPath = "/plugins/omarchy-kids/ManagerWidget.qml"
 const config = {
@@ -445,7 +445,7 @@ assert.equal(integration.barLocation(noStockConfig, "omarchy.menu"), null)
 assert.deepEqual(noStockConfig.bar.layout, {left: [], center: [], right: []})
 
 // A user who disabled the stock menu must keep that preference through enable,
-// repeated shell syncs/reloads, Kids Mode exit, and removal while active.
+// repeated shell syncs/reloads, Kids Menu exit, and removal while active.
 for (const stockPresent of [false, true]) {
   for (const removalWhileActive of [false, true]) {
     let disabledMenuConfig = {
@@ -547,7 +547,7 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'function onRawEvent(event) { root.handleHyprlandEvent(event) }' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode("Could not maintain muted notifications")' "$PLUGIN_ROOT/Service.qml" \
-  && rg -Fq 'root.failActiveMode("Could not maintain the Kids Mode shell")' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.failActiveMode("Could not maintain the Kids Menu shell")' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode(root.windowSessionError)' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode(root.shortcutPolicyError)' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'function authorizeAppLaunch(desktopId, browserRouted)' "$PLUGIN_ROOT/Service.qml" \
@@ -1320,18 +1320,18 @@ rg -Fq 'hl.define_submap("omarchy-kids", function()' "$shortcut_log" \
   && rg -Fq 'name = "omarchy-kids-window-quarantine"' "$shortcut_log" \
   && rg -Fq 'workspace = "special:omarchy-kids-quarantine silent"' "$shortcut_log" \
   && rg -Fq 'no_initial_focus = true' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Menu' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Menu' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Browser' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Omawrite' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Calculator' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + code:10", hl.dsp.focus({ workspace = "1" })' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Workspace 1' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Workspace 1' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + SHIFT + code:10", hl.dsp.window.move({ workspace = "1" })' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Move to workspace 1' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Move to workspace 1' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + code:19", hl.dsp.focus({ workspace = "10" })' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Workspace 10' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Workspace 10' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + SHIFT + code:19", hl.dsp.window.move({ workspace = "10" })' "$shortcut_log" \
-  && rg -Fq 'Kids Mode: Move to workspace 10' "$shortcut_log" \
+  && rg -Fq 'Kids Menu: Move to workspace 10' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + W", hl.dsp.window.close()' "$shortcut_log" \
   && rg -Fq 'hl.bind("XF86AudioRaiseVolume"' "$shortcut_log" \
   && rg -Fq 'hl.bind("SUPER + CTRL + L"' "$shortcut_log" \
@@ -1356,9 +1356,9 @@ jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/nul
   || fail "shortcut policy cannot rebuild itself after a shell reload"
 [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
   || fail "shortcut policy does not restore configuration before rebuilding its layer"
-! rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
-  && ! rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \
-  && ! rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
+! rg -Fq 'Kids Menu: Browser' "$shortcut_log" \
+  && ! rg -Fq 'Kids Menu: Omawrite' "$shortcut_log" \
+  && ! rg -Fq 'Kids Menu: Calculator' "$shortcut_log" \
   || fail "shortcut policy does not follow the current default-app selection"
 
 : > "$shortcut_log"
@@ -1474,7 +1474,7 @@ if shortcut_result=$(
   fail "shortcut policy accepts a failed submap activation"
 fi
 jq -e '.action == "enter" and .applied == false
-  and (.error | contains("Could not apply Kids Mode shortcuts"))' \
+  and (.error | contains("Could not apply Kids Menu shortcuts"))' \
   <<< "$shortcut_result" >/dev/null \
   && [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
   && [[ ! -e $shortcut_test_dir/recovered-runtime/omarchy-kids/shortcut-policy.active ]] \
@@ -1573,4 +1573,4 @@ for file in "$PLUGIN_ROOT"/*.qml; do
   qmllint -I /usr/share/omarchy/shell "$file"
 done
 
-echo "Omarchy Kids Mode plugin checks passed"
+echo "Kids Menu plugin checks passed"

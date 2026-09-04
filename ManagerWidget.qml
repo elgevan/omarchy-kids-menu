@@ -6,10 +6,10 @@ import qs.Ui
 // Service.qml. The stock-looking left button remains dedicated to the menu.
 BarWidget {
   id: root
-  moduleName: "io.github.elgevan.kids-mode.manager"
+  moduleName: "io.github.elgevan.kids-menu.manager"
 
   readonly property var allowlistService: bar && bar.shell
-    ? bar.shell.serviceFor("io.github.elgevan.kids-mode")
+    ? bar.shell.serviceFor("io.github.elgevan.kids-menu")
     : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property string modePhase: allowlistService
@@ -61,14 +61,14 @@ BarWidget {
     slotSize: Style.bar.statusSlot
     opticalSize: Style.bar.iconCanvas
     tooltipText: root.modePhase === "active"
-      ? "Kids Mode: On"
+      ? "Kids Menu: On"
       : root.modePhase === "entering"
-        ? "Kids Mode: Starting…"
+        ? "Kids Menu: Starting…"
         : root.modePhase === "exiting" || root.modePhase === "rollback"
-          ? "Kids Mode: Restoring…"
+          ? "Kids Menu: Restoring…"
           : root.modePhase === "error"
-            ? "Kids Mode: Needs attention"
-            : "Kids Mode: Off"
+            ? "Kids Menu: Needs attention"
+            : "Kids Menu: Off"
     active: root.opened || root.modePhase === "active"
     onPressed: root.togglePanel()
   }
