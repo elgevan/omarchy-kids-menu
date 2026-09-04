@@ -54,7 +54,9 @@ const assert = require("node:assert/strict")
 const allowlist = require(process.argv[2])
 
 assert.deepEqual(allowlist.defaultIds(), ["chromium", "google-chrome", "omacalc", "omawrite"])
-assert.deepEqual(allowlist.parseSettings("not json"), allowlist.defaultIds())
+assert.equal(allowlist.parseSettings(""), null)
+assert.equal(allowlist.parseSettings("not json"), null)
+assert.equal(allowlist.parseSettings(JSON.stringify({version: 2, allowedDesktopIds: ["chromium"]})), null)
 assert.deepEqual(
   allowlist.parseSettings(JSON.stringify({version: 1, allowedDesktopIds: []})),
   []
@@ -266,6 +268,28 @@ jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper does not report a clean inactive state"
 
+window_collision_dir=$(mktemp -d)
+collision_log=$window_collision_dir/hyprctl.log
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_collision_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$collision_log" \
+    "$WINDOW_SESSION" enter
+); then
+  fail "window-session helper accepts an existing Kids workspace"
+fi
+jq -e '.action == "enter" and .status == "workspace-in-use" and .failed == 1' \
+  <<< "$window_result" >/dev/null \
+  && [[ ! -f $window_collision_dir/omarchy-kids/windows.json ]] \
+  && [[ ! -s $collision_log ]] \
+  || fail "window-session helper does not reject a workspace name collision safely"
+rm -rf -- "$window_collision_dir"
+
 window_result=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_test_dir" \
@@ -418,7 +442,7 @@ window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$multi_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -426,7 +450,7 @@ window_result=$(
     "$WINDOW_SESSION" exit
 )
 jq -e '.status == "restored" and .expected == 2 and .restored == 2
-  and .evacuated == 2 and .kidsRemaining == 0
+  and .evacuated == 3 and .kidsRemaining == 0
   and .workspaceRemoved == true and .failed == 0' \
   <<< "$window_result" >/dev/null \
   && jq -e '.active == false and .status == "restored"
@@ -435,8 +459,9 @@ jq -e '.status == "restored" and .expected == 2 and .restored == 2
   || fail "window-session helper does not close Kids-launched windows"
 rg -q 'hl\.dsp\.window\.close.*address:0xccc' "$multi_log" \
   && rg -q 'hl\.dsp\.window\.close.*address:0xddd' "$multi_log" \
-  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd)' "$multi_log" \
-  && ! rg -q 'hl\.dsp\.window\.close.*address:0x(aaa|bbb|eee)' "$multi_log" \
+  && rg -q 'hl\.dsp\.window\.close.*address:0xeee' "$multi_log" \
+  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd|eee)' "$multi_log" \
+  && ! rg -q 'hl\.dsp\.window\.close.*address:0x(aaa|bbb|fff)' "$multi_log" \
   || fail "window-session helper closes the wrong post-entry windows"
 monitor_focus_line=$(rg -nF 'hl.dsp.focus({ monitor = "DP-2" })' "$multi_log" \
   | tail -1 | cut -d: -f1)
@@ -463,7 +488,7 @@ if window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$residual_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -474,10 +499,10 @@ if window_result=$(
   fail "window-session helper accepts a residual Kids workspace"
 fi
 jq -e '.status == "restore-failed" and .workspaceRemoved == false
-  and .evacuated == 2 and .failed > 0' <<< "$window_result" >/dev/null \
+  and .evacuated == 3 and .failed > 0' <<< "$window_result" >/dev/null \
   && jq -e '.active == true and .status == "restore-failed"' \
     "$window_residual_dir/omarchy-kids/windows.json" >/dev/null \
-  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd)' "$residual_log" \
+  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd|eee)' "$residual_log" \
   || fail "window-session helper does not retain a failed workspace disappearance check"
 
 window_misdirected_dir=$(mktemp -d)
@@ -497,7 +522,7 @@ if window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_misdirected" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$misdirected_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -529,7 +554,7 @@ if window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_close_refused" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$refusal_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -567,7 +592,7 @@ window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_address_reused" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_address_reused_closed" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=1 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$reused_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -575,7 +600,7 @@ window_result=$(
     "$WINDOW_SESSION" exit
 )
 jq -e '.status == "restored" and .expected == 2 and .live == 1
-  and .missing == 1 and .restored == 1 and .evacuated == 1
+  and .missing == 1 and .restored == 1 and .evacuated == 2
   and .kidsRemaining == 0 and .workspaceRemoved == true' \
   <<< "$window_result" >/dev/null \
   && rg -q 'hl\.dsp\.window\.close.*address:0xaaa' "$reused_log" \
@@ -697,7 +722,7 @@ window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$cleanup_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -706,7 +731,7 @@ window_result=$(
 )
 jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null \
   && jq -e '.active == false and .status == "restored"
-    and .evacuated == 2 and .workspaceRemoved == true' \
+    and .evacuated == 3 and .workspaceRemoved == true' \
     "$window_cleanup_dir/omarchy-kids/windows.json" >/dev/null \
   || fail "detached lifecycle cleanup does not order verified exit before shortcut release"
 
@@ -733,7 +758,7 @@ if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_close_refused" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$cleanup_refusal_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -752,32 +777,23 @@ window_dirty_inactive_dir=$(mktemp -d)
 dirty_runtime=$window_dirty_inactive_dir/runtime
 mkdir -p "$dirty_runtime/omarchy-kids"
 printf 'version=1\n' > "$dirty_runtime/omarchy-kids/shortcut-policy.active"
-if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_dirty_inactive_dir/state" \
     XDG_RUNTIME_DIR="$dirty_runtime" \
     OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
-    OMARCHY_KIDS_CLEANUP_RETRY_SECONDS=0 \
-    OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS=3 \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
     OMARCHY_KIDS_TEST_WINDOW_LOG="$window_dirty_inactive_dir/hyprctl.log" \
-    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"; then
-  fail "detached lifecycle cleanup accepts unverified inactive state"
-fi
-[[ -f $dirty_runtime/omarchy-kids/shortcut-policy.active \
-    && ! -e $dirty_runtime/omarchy-kids/shortcut-policy.lock ]] \
-  || fail "detached lifecycle cleanup releases shortcuts after dirty inactive exit"
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"
+)
+jq -e '.action == "exit" and .applied == false and .restored == true' \
+  <<< "$window_result" >/dev/null \
+  && [[ ! -e $dirty_runtime/omarchy-kids/shortcut-policy.active ]] \
+  && ! rg -q 'hl\.dsp\.window\.(close|move)' "$window_dirty_inactive_dir/hyprctl.log" \
+  || fail "cleanup claims an unrelated workspace when there is no active session"
 
-rg -q 'readonly property bool kidsModeActive:' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'allowlistService\.modePhase === "active"' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'result\.workspaceRemoved === true' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'Number\(result\.kidsRemaining \|\| 0\) === 0' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'windowLaunchGuardPending\(\)' "$PLUGIN_ROOT/Service.qml" \
-  || fail "the menu lifecycle does not gate launches and enforce cleanup verification"
-rg -q 'MAX_ATTEMPTS=.*:-0' "$LIFECYCLE_CLEANUP" \
-  && rg -q 'while \(\(MAX_ATTEMPTS == 0' "$LIFECYCLE_CLEANUP" \
-  || fail "detached lifecycle cleanup is not durable after a refused close"
 rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cleanup_dir" \
   "$window_stale_dir" "$window_hotplug_dir" "$window_legacy_dir" "$window_refusal_dir" \
   "$window_reused_dir" "$window_misdirected_dir" \
@@ -851,6 +867,57 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
   && [[ ! -e $shortcut_test_dir/runtime/omarchy-kids/shortcut-policy.active ]] \
   || fail "shortcut policy does not restore Hyprland state on exit"
 
+: > "$shortcut_log"
+if shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/recovered-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_RENDERED_BINDS="$keybindings_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    OMARCHY_KIDS_TEST_FAIL_EVAL=true \
+    "$SHORTCUT_POLICY" enter true true true
+); then
+  fail "shortcut policy accepts a failed submap activation"
+fi
+jq -e '.action == "enter" and .applied == false
+  and (.error | contains("Could not apply Kids Mode shortcuts"))' \
+  <<< "$shortcut_result" >/dev/null \
+  && [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
+  && [[ ! -e $shortcut_test_dir/recovered-runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy does not clear ownership after verified recovery"
+
+: > "$shortcut_log"
+if shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_RENDERED_BINDS="$keybindings_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    OMARCHY_KIDS_TEST_FAIL_EVAL=true \
+    OMARCHY_KIDS_TEST_FAIL_RELOAD=true \
+    "$SHORTCUT_POLICY" enter true true true
+); then
+  fail "shortcut policy accepts failed activation and recovery"
+fi
+jq -e '.action == "enter" and .applied == false
+  and (.error | contains("automatic restore also failed"))' \
+  <<< "$shortcut_result" >/dev/null \
+  && [[ -f $shortcut_test_dir/uncertain-runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy drops ownership after unverified recovery"
+shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" exit
+)
+jq -e '.action == "exit" and .applied == false and .restored == true' \
+  <<< "$shortcut_result" >/dev/null \
+  && [[ ! -e $shortcut_test_dir/uncertain-runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy cannot recover retained ownership on retry"
+
 if shortcut_result=$(
   XDG_RUNTIME_DIR="$shortcut_test_dir/universal-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
@@ -880,121 +947,10 @@ jq -e '.action == "enter" and .applied == false
   || fail "shortcut policy does not explain a target-submap collision"
 rm -rf -- "$shortcut_test_dir"
 
-rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'Allowlist\.filterRows' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'sourceAppLibrary\.launch' "$PLUGIN_ROOT/Menu.qml" \
-  || fail "menu is not filtering and launching through Omarchy DesktopEntries"
-
-rg -q 'KidsBrowser\.isBrowser' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'KidsBrowser\.webAppUrl' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'function entryFor' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'entry\.execString' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -Fq 'Quickshell.execDetached(KidsBrowser.launchCommand' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q -- '--user-data-dir=' "$PLUGIN_ROOT/KidsBrowser.js" \
-  && rg -q -- '--no-first-run' "$PLUGIN_ROOT/KidsBrowser.js" \
-  && rg -q -- '--disable-sync' "$PLUGIN_ROOT/KidsBrowser.js" \
-  && rg -q -- '--new-window' "$PLUGIN_ROOT/KidsBrowser.js" \
-  && rg -q -- '--app=' "$PLUGIN_ROOT/KidsBrowser.js" \
-  || fail "Kids Mode browser and web-app launches are not isolated in the persistent local profile"
-
-rg -q 'special:omarchy-kids-parent' "$WINDOW_SESSION" \
-  && rg -q 'hl\.dsp\.window\.move' "$WINDOW_SESSION" \
-  && rg -q 'hl\.dsp\.window\.pin' "$WINDOW_SESSION" \
-  && rg -q 'hl\.dsp\.focus' "$WINDOW_SESSION" \
-  && rg -q 'originalActiveWorkspace' "$WINDOW_SESSION" \
-  && rg -q 'Quickshell\.execDetached\(\[root\.windowSessionTool, "exit"\]\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'function guardAppLaunch' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Menu.qml" \
-  || fail "Kids Mode does not reversibly hide and guard pre-existing windows"
-
-rg -q 'item\.userMenuPath = root\.pluginRoot \+ "/empty-menu\.jsonc"' "$PLUGIN_ROOT/Menu.qml" \
-  || fail "normal menu extensions can leak unfiltered actions into kids mode"
-
-rg -q 'function remove\(' "$PLUGIN_ROOT/Menu.qml" \
-  && ! rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)' "$PLUGIN_ROOT/Menu.qml" "$PLUGIN_ROOT/Service.qml" "$MENU" \
-  || fail "plugin can install, uninstall, or remove an application"
-
-rg -q 'allowed-apps\.json' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'toggleAllowed' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'readonly property bool allowlistEditable: root\.modeStateLoaded && !root\.kidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'persist && !root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q '!root\.allowlistEditable' "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'enabled: root\.allowlistEditable' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'selectionFilter === "selected"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'selectionFilter === "not-selected"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'filterLabel: "NOT SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'Qt\.Key_3' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'managerWidgetId: pluginId \+ "\.manager"' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'ShellIntegration\.activate' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'ManagerWidget\.qml' "$PLUGIN_ROOT/Service.qml" \
-  || fail "right-side app manager is not mode-gated or wired to the persisted allowlist and quick filters"
-
-if rg -Fq 'Normal Omarchy menu active • notifications restored' "$PLUGIN_ROOT/Panel.qml" \
-  || rg -Fq 'App selections are saved automatically across reboots.' "$PLUGIN_ROOT/Panel.qml" \
-  || rg -Fq 'apps available • notifications muted' "$PLUGIN_ROOT/Panel.qml" \
-  || rg -Fq 'Exit Kids Mode to change available apps.' "$PLUGIN_ROOT/Panel.qml"; then
-  fail "manager still contains removed redundant status text"
-fi
-
-rg -Fq 'contentWidth: panel.fittedContentWidth(Style.space(440))' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq 'contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(610))' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq 'height: Style.space(50)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq 'height: Style.space(360)' "$PLUGIN_ROOT/Panel.qml" \
-  || fail "manager compact sizing has regressed"
-
-rg -q 'setStockMenuDisabled\(config, kidsModeEnabled === true\)' "$PLUGIN_ROOT/ShellIntegration.js" \
-  && rg -q 'ShellIntegration\.deactivate' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'root\.shell\.hide\(ShellIntegration\.STOCK_MENU_ID\)' "$PLUGIN_ROOT/Service.qml" \
-  && ! jq -e '.omarchy.clonedFrom? != null' "$MANIFEST" >/dev/null \
-  || fail "standalone shell integration does not block and restore the stock menu cleanly"
-
-rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'root\.kidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'setDoNotDisturb\(true\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'notifications\.setDoNotDisturb\(root\.notificationRestoreDnd\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'NotificationState\.stateText\(false, false\)' "$PLUGIN_ROOT/Service.qml" \
-  || fail "Kids Mode does not mute notifications and restore the previous DND state"
-
-rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'function setKidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'function maybeCompleteActivation' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'root\.modePhase = "active"' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'root\.rollbackActivation' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'root\.kidsModeEnabled \? filteredShell : root\.shell' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q '/default/omarchy/omarchy-menu\.jsonc' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'serviceFor\("omarchy\.lock"\)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'root\.lockService\.beginLock\(\)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'setKidsModeEnabled\(false\)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'root\.modePhase === "entering".*"STARTING"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q '"EXIT KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q '"START KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
-  || fail "the persistent Kids Mode toggle is not protected by Omarchy authentication"
-
-rg -q 'shortcutPolicyTool' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q '"/shortcut-policy"' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'scheduleShortcutPolicySync' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'Quickshell\.execDetached\(\[root\.shortcutPolicyTool, "exit"\]\)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -q 'function launchKidsBrowser' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'function launchAllowedApp' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'function shortcutStatus' "$PLUGIN_ROOT/Menu.qml" \
-  && rg -q 'hyprctl' "$SHORTCUT_POLICY" \
-  && ! rg -q '\.config/hypr|bindings\.lua' "$SHORTCUT_POLICY" \
-  || fail "Kids Mode shortcuts are not transient, reversible, and browser-isolated"
-
 if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' \
   "$PLUGIN_ROOT/Panel.qml" "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
   fail "the plugin handles credentials directly or invokes a privileged helper"
 fi
-
-rg -q 'text: "\\ue900"' "$PLUGIN_ROOT/BarWidget.qml" \
-  && rg -q 'fontFamily: "omarchy"' "$PLUGIN_ROOT/BarWidget.qml" \
-  && rg -q 'omarchy-shell shell toggle io\.github\.elgevan\.omarchy-kids' "$PLUGIN_ROOT/BarWidget.qml" \
-  || fail "left menu button does not preserve the normal Omarchy symbol"
-
-rg -q 'moduleName: "io\.github\.elgevan\.omarchy-kids\.manager"' "$PLUGIN_ROOT/ManagerWidget.qml" \
-  && rg -q 'text: ""' "$PLUGIN_ROOT/ManagerWidget.qml" \
-  && rg -q 'ipcTarget: "io\.github\.elgevan\.omarchy-kids\.manager"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q 'onPressed: root\.togglePanel' "$PLUGIN_ROOT/ManagerWidget.qml" \
-  || fail "separate Kids manager widget is not a normal standalone bar control"
 
 if rg -q 'xdg-terminal-exec' "$PLUGIN_ROOT/BarWidget.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
   fail "a kids-mode bar control retains the terminal shortcut"

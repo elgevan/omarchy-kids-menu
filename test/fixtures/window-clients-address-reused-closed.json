@@ -8,15 +8,5 @@
     "pinned": true,
     "floating": true,
     "fullscreen": 0
-  },
-  {
-    "address": "0xeee",
-    "mapped": true,
-    "workspace": {"name": "other"},
-    "class": "unrelated",
-    "title": "Unrelated post-entry window",
-    "pinned": false,
-    "floating": false,
-    "fullscreen": 0
   }
 ]

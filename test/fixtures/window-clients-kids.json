@@ -43,10 +43,20 @@
     "address": "0xeee",
     "mapped": true,
     "workspace": {"name": "other"},
-    "class": "unrelated",
-    "title": "Unrelated post-entry window",
+    "class": "misdirected",
+    "title": "Misdirected Kids Mode window",
     "pinned": false,
     "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xfff",
+    "mapped": true,
+    "workspace": {"name": "special:omarchy-kids-parent"},
+    "class": "parent-dialog",
+    "title": "Parent background dialog",
+    "pinned": false,
+    "floating": true,
     "fullscreen": 0
   }
 ]

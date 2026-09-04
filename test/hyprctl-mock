@@ -9,10 +9,19 @@ case ${1:-} in
     ;;
   eval)
     printf 'eval\n%s\n' "${2:-}" >>"$OMARCHY_KIDS_TEST_LOG"
+    if [[ ${OMARCHY_KIDS_TEST_FAIL_EVAL:-false} == true \
+        && ${2:-} == *'hl.define_submap("omarchy-kids"'* ]]; then
+      echo "mock eval failure" >&2
+      exit 1
+    fi
     echo ok
     ;;
   reload)
     echo reload >>"$OMARCHY_KIDS_TEST_LOG"
+    if [[ ${OMARCHY_KIDS_TEST_FAIL_RELOAD:-false} == true ]]; then
+      echo "mock reload failure" >&2
+      exit 1
+    fi
     echo ok
     ;;
   configerrors)

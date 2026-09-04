@@ -166,16 +166,6 @@ Loader {
     return "ok"
   }
 
-  function shortcutStatus() {
-    if (!root.allowlistService) return "unavailable"
-    return JSON.stringify({
-      applied: root.allowlistService.shortcutPolicyApplied === true,
-      busy: root.allowlistService.shortcutPolicyBusy === true,
-      error: String(root.allowlistService.shortcutPolicyError || ""),
-      desired: String(root.allowlistService.shortcutPolicyDesiredSignature || "")
-    })
-  }
-
   function configureMenu() {
     if (!item) return
 

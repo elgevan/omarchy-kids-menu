@@ -178,12 +178,13 @@ enter_session() {
     return 1
   fi
 
-  local clients_file active_window_file active_workspace_file state_tmp
+  local clients_file active_window_file active_workspace_file workspaces_file state_tmp
   clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
   active_window_file=$(mktemp "$STATE_DIR/active-window.XXXXXX")
   active_workspace_file=$(mktemp "$STATE_DIR/active-workspace.XXXXXX")
+  workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
   state_tmp=$(mktemp "$STATE_DIR/windows.XXXXXX")
-  trap 'rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$state_tmp"' RETURN
+  trap 'rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$workspaces_file" "$state_tmp"' RETURN
 
   if ! "$HYPRCTL_BIN" -j clients > "$clients_file" \
       || ! jq -e 'type == "array"' "$clients_file" >/dev/null; then
@@ -198,6 +199,20 @@ enter_session() {
   if ! "$HYPRCTL_BIN" -j activeworkspace > "$active_workspace_file" \
       || ! jq -e 'type == "object"' "$active_workspace_file" >/dev/null; then
     emit enter unavailable 0 0 0 0 0 0 1
+    return 1
+  fi
+  if ! "$HYPRCTL_BIN" -j workspaces > "$workspaces_file" \
+      || ! jq -e 'type == "array"' "$workspaces_file" >/dev/null; then
+    emit enter unavailable 0 0 0 0 0 0 1
+    return 1
+  fi
+
+  # The named workspace is plugin-owned for the lifetime of a session. Refuse
+  # an existing workspace instead of later claiming its windows or making
+  # successful restoration impossible.
+  if jq -e --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+      'any(.[]; (.name // "") == $kidsWorkspace)' "$workspaces_file" >/dev/null; then
+    emit enter workspace-in-use 0 0 0 0 0 0 1
     return 1
   fi
 
@@ -244,7 +259,7 @@ enter_session() {
   fi
 
   mv -- "$state_tmp" "$STATE_FILE"
-  rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file"
+  rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$workspaces_file"
   trap - RETURN
   hidden=$(jq -r '.windows | length' "$STATE_FILE")
 
@@ -282,39 +297,22 @@ enter_session() {
 exit_session() {
   local instance expected=0 live=0 missing=0 restored=0 failed=0
   local evacuated=0 evacuation_expected=0 close_remaining=0 kids_remaining=0
-  local post_entry_kids_remaining=0
+  local post_entry_remaining=0
   local compensation_failed=0
   local original_monitor_available=false
   instance=$(current_instance)
 
-  if [[ ! -f $STATE_FILE ]] \
-      || ! jq -e '.version == 1 and .active == true' "$STATE_FILE" >/dev/null 2>&1; then
-    local inactive_clients_file inactive_workspaces_file inactive_kids_remaining=0
-    inactive_clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
-    inactive_workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
-    if [[ -z $instance ]] \
-        || ! "$HYPRCTL_BIN" -j clients > "$inactive_clients_file" \
-        || ! jq -e 'type == "array"' "$inactive_clients_file" >/dev/null \
-        || ! "$HYPRCTL_BIN" -j workspaces > "$inactive_workspaces_file" \
-        || ! jq -e 'type == "array"' "$inactive_workspaces_file" >/dev/null; then
-      rm -f -- "$inactive_clients_file" "$inactive_workspaces_file"
-      emit exit unavailable 0 0 0 0 0 0 1
-      return 1
-    fi
-    inactive_kids_remaining=$(jq --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-      '[.[]
-        | select((.mapped // true) == true)
-        | select((.workspace.name // "") == $kidsWorkspace)]
-      | length' "$inactive_clients_file")
-    if ((inactive_kids_remaining > 0)) \
-        || jq -e --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-          'any(.[]; .name == $kidsWorkspace)' "$inactive_workspaces_file" >/dev/null; then
-      rm -f -- "$inactive_clients_file" "$inactive_workspaces_file"
-      emit exit restore-failed 0 0 0 0 0 0 1 0 \
-        "$inactive_kids_remaining" false
-      return 1
-    fi
-    rm -f -- "$inactive_clients_file" "$inactive_workspaces_file"
+  if [[ ! -f $STATE_FILE ]]; then
+    emit exit inactive 0 0 0 0 0 0 0 0 0 true
+    return
+  fi
+
+  if ! jq -e '.version == 1' "$STATE_FILE" >/dev/null 2>&1; then
+    emit exit unavailable 0 0 0 0 0 0 1
+    return 1
+  fi
+
+  if ! jq -e '.active == true' "$STATE_FILE" >/dev/null; then
     emit exit inactive 0 0 0 0 0 0 0 0 0 true
     return
   fi
@@ -404,7 +402,7 @@ exit_session() {
   selector=$(workspace_selector "$original_workspace")
 
   evacuation_expected=$(jq \
-    --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+    --arg parentWorkspace "$PARENT_WORKSPACE" \
     --slurpfile state "$STATE_FILE" \
     'def saved_matches($saved; $client):
       $client.address == $saved.address
@@ -417,7 +415,7 @@ exit_session() {
     [.[] as $client
       | $client
       | select((.mapped // true) == true)
-      | select((.workspace.name // "") == $kidsWorkspace)
+      | select((.workspace.name // "") != $parentWorkspace)
       | select(any($state[0].windows[]; saved_matches(.; $client)) | not)]
     | length' "$clients_file")
 
@@ -432,7 +430,7 @@ exit_session() {
     # disappearance below, rather than the dispatcher status, is authoritative.
     close_window "$address" || true
   done < <(jq -r \
-    --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+    --arg parentWorkspace "$PARENT_WORKSPACE" \
     --slurpfile state "$STATE_FILE" \
     'def saved_matches($saved; $client):
       $client.address == $saved.address
@@ -445,7 +443,7 @@ exit_session() {
     .[] as $client
       | $client
       | select((.mapped // true) == true)
-      | select((.workspace.name // "") == $kidsWorkspace)
+      | select((.workspace.name // "") != $parentWorkspace)
       | select(any($state[0].windows[]; saved_matches(.; $client)) | not)
       | @base64' "$clients_file")
 
@@ -469,8 +467,8 @@ exit_session() {
         fi
       done < "$close_targets_file"
       evacuated=$((evacuation_expected - close_remaining))
-      post_entry_kids_remaining=$(jq \
-        --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+      post_entry_remaining=$(jq \
+        --arg parentWorkspace "$PARENT_WORKSPACE" \
         --slurpfile state "$STATE_FILE" \
         'def saved_matches($saved; $client):
           $client.address == $saved.address
@@ -483,10 +481,10 @@ exit_session() {
         [.[] as $client
           | $client
           | select((.mapped // true) == true)
-          | select((.workspace.name // "") == $kidsWorkspace)
+          | select((.workspace.name // "") != $parentWorkspace)
           | select(any($state[0].windows[]; saved_matches(.; $client)) | not)]
         | length' "$post_clients_file")
-      if ((close_remaining == 0 && post_entry_kids_remaining == 0)); then
+      if ((close_remaining == 0 && post_entry_remaining == 0)); then
         close_check_complete=true
         break
       fi

@@ -35,7 +35,7 @@ function defaultIds() {
 
 function parseSettings(rawText) {
   var text = String(rawText || "").trim()
-  if (!text) return defaultIds()
+  if (!text) return null
 
   try {
     var parsed = JSON.parse(text)
@@ -44,7 +44,7 @@ function parseSettings(rawText) {
   } catch (error) {
   }
 
-  return defaultIds()
+  return null
 }
 
 function settingsText(values) {

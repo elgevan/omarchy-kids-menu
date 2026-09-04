@@ -60,12 +60,6 @@ function normalizedRestore(value) {
   }
 }
 
-function restoreFromPluginEntry(config, pluginId) {
-  var location = barLocation(config, pluginId)
-  if (!location || !isObject(location.entry)) return null
-  return normalizedRestore(location.entry[RESTORE_KEY])
-}
-
 function setStockMenuDisabled(config, disabled) {
   var current = Array.isArray(config.disabledPlugins) ? config.disabledPlugins : []
   var next = current.filter(function(id) { return String(id) !== STOCK_MENU_ID })
@@ -166,7 +160,6 @@ if (typeof module !== "undefined") {
     ensureConfigShape: ensureConfigShape,
     barLocation: barLocation,
     normalizedRestore: normalizedRestore,
-    restoreFromPluginEntry: restoreFromPluginEntry,
     setStockMenuDisabled: setStockMenuDisabled,
     activate: activate,
     deactivate: deactivate

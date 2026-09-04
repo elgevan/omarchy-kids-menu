@@ -20,13 +20,13 @@
     "fullscreen": 0
   },
   {
-    "address": "0xeee",
+    "address": "0xfff",
     "mapped": true,
-    "workspace": {"name": "other"},
-    "class": "unrelated",
-    "title": "Unrelated post-entry window",
+    "workspace": {"name": "special:omarchy-kids-parent"},
+    "class": "parent-dialog",
+    "title": "Parent background dialog",
     "pinned": false,
-    "floating": false,
+    "floating": true,
     "fullscreen": 0
   }
 ]

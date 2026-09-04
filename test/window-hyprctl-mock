@@ -76,5 +76,11 @@ if [[ ${1:-} == --quiet && ${2:-} == dispatch ]]; then
   exit 0
 fi
 
+if [[ ${1:-} == reload || ${1:-} == eval ]]; then
+  printf '%s\n' "${1:-}" >> "$OMARCHY_KIDS_TEST_WINDOW_LOG"
+  echo ok
+  exit 0
+fi
+
 echo "unexpected hyprctl mock call: $*" >&2
 exit 1

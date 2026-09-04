@@ -36,14 +36,12 @@ Item {
   property bool notificationPolicySynced: false
   property int notificationSetupAttempts: 0
   property int hiddenWindowCount: 0
-  property bool windowSessionBusy: false
   property string windowSessionError: ""
   property bool windowSessionDesired: false
   property bool windowSessionApplied: false
   property bool windowSessionSynced: false
   property int windowGuardAttemptsRemaining: 0
   property var stockMenuRestore: null
-  property bool shellIntegrationReady: false
   property bool shellModeApplied: false
   property bool shellPolicySynced: false
   property int shellSetupAttempts: 0
@@ -71,8 +69,6 @@ Item {
     && root.notificationService
     && root.notificationService.doNotDisturb === true
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
-  readonly property bool modeTransitionBusy: root.modePhase === "entering"
-    || root.modePhase === "exiting" || root.modePhase === "rollback"
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
     : "io.github.elgevan.omarchy-kids"
@@ -142,15 +138,16 @@ Item {
   }
 
   function load(rawText) {
-    root.replaceAllowedIds(Allowlist.parseSettings(rawText), false)
+    var ids = Allowlist.parseSettings(rawText)
+    root.replaceAllowedIds(ids === null ? [] : ids, false)
+  }
+
+  function loadDefaults() {
+    root.replaceAllowedIds(root.defaultDesktopIds, false)
   }
 
   function isAllowed(desktopId) {
     return Allowlist.contains(root.allowedDesktopIds, desktopId)
-  }
-
-  function isDefault(desktopId) {
-    return Allowlist.contains(root.defaultDesktopIds, desktopId)
   }
 
   function setAllowed(desktopId, allowed) {
@@ -265,11 +262,33 @@ Item {
     root.windowSessionSynced = false
     root.shellPolicySynced = false
     root.shortcutPolicySynced = false
-    root.windowSessionDesired = true
-    root.scheduleNotificationSetup()
-    root.scheduleWindowSessionSync()
-    root.scheduleShellIntegration()
-    root.scheduleShortcutPolicySync()
+    root.windowSessionDesired = false
+    root.advanceActivation()
+  }
+
+  // Establish each restriction before moving the user into the Kids workspace.
+  // This keeps ordinary shortcuts and the stock menu unavailable throughout the
+  // transition, and makes rollback unwind a known prefix of the sequence.
+  function advanceActivation() {
+    if (root.modePhase !== "entering") return
+    if (!root.shellPolicySynced || !root.shellModeApplied) {
+      root.scheduleShellIntegration()
+      return
+    }
+    if (!root.shortcutPolicySynced || !root.shortcutPolicyApplied) {
+      root.scheduleShortcutPolicySync()
+      return
+    }
+    if (!root.notificationPolicySynced || !root.notificationsMuted) {
+      root.scheduleNotificationSetup()
+      return
+    }
+    if (!root.windowSessionDesired) {
+      root.windowSessionDesired = true
+      root.scheduleWindowSessionSync()
+      return
+    }
+    root.maybeCompleteActivation()
   }
 
   function abortPendingActivation(message) {
@@ -306,14 +325,13 @@ Item {
     root.controlReleaseStarted = false
     root.windowSessionDesired = false
     root.windowSessionSynced = false
-    if (!root.windowSessionTool && !windowSessionEnter.running
-        && !root.windowSessionApplied) {
-      root.windowSessionSynced = true
-      root.startControlRelease()
-      return
-    }
     if (!root.windowSessionTool) {
-      root.modePhase = "error"
+      if (!windowSessionEnter.running && !root.windowSessionApplied) {
+        root.windowSessionSynced = true
+        root.startControlRelease()
+      } else {
+        root.modePhase = "error"
+      }
       return
     }
     root.scheduleWindowSessionSync()
@@ -349,14 +367,14 @@ Item {
     root.controlReleaseStarted = false
     root.windowSessionDesired = false
     root.windowSessionSynced = false
-    if (!root.windowSessionTool && !root.windowSessionApplied) {
-      root.windowSessionSynced = true
-      root.startControlRelease()
-      return
-    }
     if (!root.windowSessionTool) {
-      root.modePhase = "error"
-      root.modeTransitionError = "Runtime helpers are not available yet"
+      if (!root.windowSessionApplied) {
+        root.windowSessionSynced = true
+        root.startControlRelease()
+      } else {
+        root.modePhase = "error"
+        root.modeTransitionError = "Runtime helpers are not available yet"
+      }
       return
     }
     root.scheduleWindowSessionSync()
@@ -433,7 +451,7 @@ Item {
     root.notificationApplied = true
     if (notifications.doNotDisturb !== true) return false
     root.notificationPolicySynced = true
-    root.maybeCompleteActivation()
+    root.advanceActivation()
     return true
   }
 
@@ -493,7 +511,6 @@ Item {
         || windowSessionEnter.running || windowSessionExit.running)
       return
 
-    root.windowSessionBusy = true
     root.windowSessionError = ""
     if (root.windowSessionDesired) windowSessionEnter.running = true
     else windowSessionExit.running = true
@@ -501,7 +518,6 @@ Item {
 
   function finishWindowSession(action, exitCode, output) {
     var result = root.parseWindowSessionOutput(output)
-    root.windowSessionBusy = false
     var status = result ? String(result.status || "") : ""
     var enteringSucceeded = action === "enter" && exitCode === 0
       && (status === "active" || status === "already-active")
@@ -518,9 +534,11 @@ Item {
       && (restoredSession || staleSession || alreadyInactive)
 
     if (!enteringSucceeded && !exitingSucceeded) {
-      root.windowSessionError = action === "enter"
-        ? "Could not hide existing windows"
-        : "Could not restore hidden windows"
+      root.windowSessionError = action === "enter" && status === "workspace-in-use"
+        ? "A workspace named omarchy-kids is already in use"
+        : action === "enter"
+          ? "Could not hide existing windows"
+          : "Could not restore hidden windows"
       if (result && Number(result.failed || 0) > 0)
         root.windowSessionError += " (" + Number(result.failed) + " failed)"
       if (action === "enter") {
@@ -538,7 +556,7 @@ Item {
       root.hiddenWindowCount = Math.max(0, Number(result.hidden || 0))
       root.windowSessionApplied = true
       root.windowSessionSynced = true
-      root.maybeCompleteActivation()
+      root.advanceActivation()
     } else {
       root.hiddenWindowCount = 0
       root.windowSessionApplied = false
@@ -630,7 +648,7 @@ Item {
     } else {
       root.shortcutPolicyApplied = action === "enter"
       root.shortcutPolicySynced = true
-      if (action === "enter") root.maybeCompleteActivation()
+      if (action === "enter") root.advanceActivation()
       else root.maybeCompleteDeactivation()
     }
 
@@ -665,10 +683,9 @@ Item {
         )
         if (result && result.restore) root.stockMenuRestore = result.restore
       })
-      root.shellIntegrationReady = true
       root.shellModeApplied = root.modeEffectsDesired
       root.shellPolicySynced = true
-      if (root.modeEffectsDesired) root.maybeCompleteActivation()
+      if (root.modeEffectsDesired) root.advanceActivation()
       else root.maybeCompleteDeactivation()
       return true
     } catch (error) {
@@ -682,7 +699,6 @@ Item {
     root.shell.mutateShellConfig(function(config) {
       ShellIntegration.deactivate(config, root.managerWidgetId, root.stockMenuRestore)
     })
-    root.shellIntegrationReady = false
     root.shellModeApplied = false
     root.shellPolicySynced = true
   }
@@ -694,7 +710,7 @@ Item {
     atomicWrites: true
     printErrors: false
     onLoaded: root.load(text())
-    onLoadFailed: root.load("")
+    onLoadFailed: root.loadDefaults()
     onFileChanged: reload()
   }
 
@@ -907,8 +923,6 @@ Item {
 
   Component.onDestruction: {
     if (root.pluginRegistry && !root.pluginRegistry.isEnabled(root.pluginId)) {
-      root.releaseNotificationPolicy()
-      root.releaseShellIntegration()
       if (root.lifecycleCleanupTool && root.windowSessionTool && root.shortcutPolicyTool) {
         Quickshell.execDetached([
           root.lifecycleCleanupTool,
@@ -920,6 +934,16 @@ Item {
           Quickshell.execDetached([root.windowSessionTool, "exit"])
         if (root.shortcutPolicyTool)
           Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
+      }
+      try {
+        root.releaseNotificationPolicy()
+      } catch (error) {
+        console.warn("omarchy-kids: could not restore notifications during removal: " + error)
+      }
+      try {
+        root.releaseShellIntegration()
+      } catch (error) {
+        console.warn("omarchy-kids: could not restore shell integration during removal: " + error)
       }
     }
   }

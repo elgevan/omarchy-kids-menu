@@ -196,8 +196,11 @@ assert(hl.get_current_submap() == \"omarchy-kids\", \"Kids Mode submap did not a
 printf 'version=1\n' >"$ACTIVE_MARKER"
 if ! error=$($HYPRCTL_BIN eval "$lua_program" 2>&1); then
   restore_error=""
-  reload_bindings >/dev/null 2>&1 || restore_error="; automatic restore also failed"
-  rm -f -- "$ACTIVE_MARKER"
+  if reload_bindings >/dev/null 2>&1; then
+    rm -f -- "$ACTIVE_MARKER"
+  else
+    restore_error="; automatic restore also failed"
+  fi
   json_result enter false "$changed" false \
     "Could not apply Kids Mode shortcuts: $error$restore_error"
   exit 1
