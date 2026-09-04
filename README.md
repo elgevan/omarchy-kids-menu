@@ -1,78 +1,70 @@
-# Omarchy Kids Menu
+# Kids Mode for Omarchy
 
-Omarchy Kids Menu is a standalone plugin with its own permanent ID. Enabling it keeps the normal Omarchy menu symbol on the left and adds a Kids Mode manager on the right. A new installation starts inactive: choose the available apps, then explicitly start Kids Mode from the manager. While active, the menu shows only selected installed applications plus Omarchy's Style menu when its tools are available, and Do Not Disturb is enabled. This is a convenience filter, not a security boundary.
+Kids Mode gives a child a simple Omarchy desktop with access to only the apps you choose.
 
-The left button opens `io.github.elgevan.omarchy-kids` directly. Because a standalone plugin cannot redirect Omarchy's built-in `omarchy.menu` IPC route, Kids Mode temporarily disables that unrestricted menu. At the same time, a transient Hyprland shortcut layer redirects the normal Menu, Apps, Theme, Background, and browser shortcuts to filtered plugin routes. Stock shortcuts that would directly open hidden apps, adult settings, numbered bar panels, capture/share tools, reminders, notification controls, or other omitted surfaces are temporarily removed. Kids Mode also blocks close-all, laptop-display, monitor-scaling, and touchpad-toggle shortcuts so an accidental key combination cannot discard work or leave the desktop apparently broken. Everyday volume, brightness, media, clipboard, lock, and normal window-navigation controls remain available. Turning Kids Mode off restores the stock IPC route and reloads the user's unchanged Hyprland configuration. Disabling or removing the plugin performs the same restoration, restores the original stock menu bar entry, and removes the manager widget.
+When Kids Mode starts, it:
 
-There is no Apps submenu. Routes sent to the plugin itself are normalized to the flattened kids root, so both `Super+Space` and `Super+Alt+Space` open the selected apps and optional Style entry while Kids Mode is active.
+- Hides the parent's open apps without closing them.
+- Shows only approved apps in the Omarchy menu.
+- Uses a separate Chromium profile for the child.
+- Filters shortcuts that would open unapproved apps or settings.
+- Turns on Do Not Disturb.
 
-The initial allowlist is Google Chrome, Chromium, Omawrite, and Omacalc. These are desktop-entry IDs, not launch commands: a default app appears only when it is installed. Style follows the same rule and is omitted when Omarchy's style commands are unavailable.
-
-Browser entries launched from the filtered Kids Mode menu use a persistent local Chromium profile at `~/.local/share/omarchy-kids/chromium`. The Google Chrome entry also routes to this Kids Chromium profile instead of exposing an adult Chrome profile. Omarchy web-app desktop entries added to the allowlist, such as YouTube, launch in app mode with that same Kids profile. Chromium skips its first-run and default-browser prompts and disables browser sync, so no browser login is required. Bookmarks, history, extensions, and local settings remain separate from the user's normal browser profiles and persist across reboots. When Kids Mode is off, browser and web-app entries use Omarchy's normal launch behavior.
-
-The stock browser shortcuts (`Super+Shift+Return`, `Super+Shift+B`, and `Super+Shift+Alt+B`) also launch the isolated Kids Chromium profile whenever a default browser entry remains selected. Omawrite and Omacalc retain guarded versions of their stock shortcuts only while selected, including the same hidden-window protection used by menu launches. Other applications added by a guardian are available from the filtered menu but do not automatically gain global shortcuts.
-
-The normal Omarchy symbol stays in its usual place on the left and opens whichever menu mode is active. The plugin records the original stock button entry in its own bar entry so that shell reloads retain the restore point. A separate child icon is installed with the other plugins on the right; click it to open the Kids Mode manager. A read-only **Active/Inactive** badge reports the current state, while a separate **Start Kids Mode/Exit Kids Mode** action makes the pending change explicit. Starting Kids Mode is immediate. Exiting it opens Omarchy's native lock screen and completes only after a valid account/parent password or configured fingerprint unlocks the session. The plugin never receives or stores the credential.
-
-Starting Kids Mode also records every existing Hyprland application window, silently moves those windows to a hidden parent workspace, and opens a clean named Kids workspace. The applications keep running, so unsaved work is not discarded. After authenticated exit, surviving windows return to their original workspaces and the previously focused window is focused again. Pinned windows are temporarily unpinned and regain their pinned state on exit. A best-effort launch guard keeps a pre-existing single-instance app hidden if starting it from the Kids menu would otherwise reveal the parent's existing window.
-
-When Kids Mode is inactive, any installed desktop app can be added to or removed from the allowlist. While Kids Mode is active, the app list and reset control are read-only; exit Kids Mode with password or fingerprint authentication before changing the selection. The **All**, **Selected**, and **Not Selected** quick filters remain available in either mode for reviewing the current allowlist. Their keyboard shortcuts are `Ctrl+1`, `Ctrl+2`, and `Ctrl+3`; `Ctrl+Shift+K` activates the mode switch. The selection and mode are saved to:
-
-```text
-~/.config/omarchy-kids/allowed-apps.json
-~/.config/omarchy-kids/mode.json
-~/.local/state/omarchy-kids/windows.json
-```
-
-When Kids Mode first enables Do Not Disturb, it remembers the existing notification preference in `~/.local/state/omarchy-kids/notifications.json`. Turning Kids Mode off or disabling the plugin restores that preference. Omarchy action confirmations and trusted critical command-line alerts retain the operating system's normal DND bypass behavior.
+Exiting Kids Mode requires the account password or a configured fingerprint. The parent's apps, workspaces, shortcuts, and notification settings are then restored.
 
 ## Requirements
 
-The plugin targets Omarchy 4's Quattro shell and requires Chromium at `/usr/bin/chromium` for its isolated Kids browser and web-app launches. It otherwise uses commands supplied by a normal Omarchy installation: `omarchy-shell`, `omarchy-menu-keybindings`, `omarchy-notification-send`, `uwsm-app`, `hyprctl`, `jq`, and `flock`. It has no install hook, requests no elevated privileges, never installs these dependencies itself, and never writes `~/.config/hypr`. Its shortcut changes exist only in the running Hyprland session and are rebuilt from the user's normal configuration on exit.
+- Omarchy 4 with the Quattro shell
+- Chromium installed at `/usr/bin/chromium`
 
 ## Install
-
-Run:
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
 ```
 
-For local development, copy the directory to `~/.config/omarchy/plugins/io.github.elgevan.omarchy-kids`, then run:
+After installation, click the child icon on the right side of the bar to open the Kids Mode manager.
 
-```bash
-omarchy plugin validate ~/.config/omarchy/plugins/io.github.elgevan.omarchy-kids
-omarchy-shell shell rescanPlugins
-omarchy plugin enable io.github.elgevan.omarchy-kids
+## Use
+
+1. Open the Kids Mode manager.
+2. Select the apps the child can use.
+3. Click **Start Kids Mode**.
+
+The normal Omarchy button now opens the approved app list. The default selections are Google Chrome, Chromium, Omawrite, and Omacalc when those apps are installed.
+
+While Kids Mode is active, the app selection is locked. Open the manager and click **Exit Kids Mode** to return to the parent desktop. Omarchy will lock the screen and complete the switch after a successful password or fingerprint check.
+
+## Separate browser profile
+
+Chromium, Google Chrome, and approved web apps use a dedicated Chromium profile while Kids Mode is active. Its history, bookmarks, extensions, settings, and signed-in websites stay separate from the parent's browser profile.
+
+The profile is stored at:
+
+```text
+~/.local/share/omarchy-kids/chromium
 ```
 
-Open the right-side Kids Mode manager to select apps and start Kids Mode. These commands control installation-level plugin activation:
+Kids Mode does not filter websites. Browser content controls should be configured separately if needed.
 
-```bash
-omarchy plugin disable io.github.elgevan.omarchy-kids
-omarchy plugin enable io.github.elgevan.omarchy-kids
-```
+## What it protects
+
+Kids Mode simplifies the desktop and helps prevent accidental access to the parent's open apps. It is intended for supervised use on a shared account, not as a replacement for a separate Linux user account or system-level parental controls.
 
 ## Remove
-
-Remove the plugin through Omarchy's standard plugin lifecycle:
 
 ```bash
 omarchy plugin remove io.github.elgevan.omarchy-kids
 ```
 
-Omarchy disables the plugin before removing its checkout. The plugin stages its two cleanup helpers in the user runtime directory so that disable can restore the stock menu and bar layout, normal shortcuts, hidden parent windows, and the previous notification preference even when removal immediately deletes the checkout. The saved allowlist, mode preference, and Kids Chromium profile remain available after a reinstall.
+Removing the plugin restores the normal menu, shortcuts, windows, and notification settings. The approved app list and Kids Chromium profile are kept so they can be used again after reinstalling.
 
-## Scope
+## Test
 
-The plugin filters the Omarchy menu, stores desktop-entry IDs and its mode in its own config, routes browser and web-app entries through a separate user-owned Chromium profile while Kids Mode is on, temporarily filters recognized stock Omarchy shortcuts at runtime, temporarily moves existing windows without closing them, temporarily controls Omarchy's Do Not Disturb state, keeps the standard menu symbol on the left, and manages a separate right-side bar control. It removes the menu button's right-click terminal shortcut. It does not install or remove applications, modify persistent Hyprland configuration, restrict terminal commands entered through another route, filter the web, override user-customized shortcuts, or prevent a knowledgeable user from disabling the plugin or reaching the hidden workspace through another route. Authentication protects the in-app Exit action; it is not a system security boundary.
-
-## Testing
-
-Run the static checks on an Omarchy host with:
+Run the plugin checks on an Omarchy system:
 
 ```bash
 ./test/run
 ```
 
-`test/vm-acceptance` is intended for a disposable VM installed from an official Omarchy ISO. It verifies inactive first-run behavior, explicit activation, filtering and restoration, browser isolation, unchanged packages, and direct removal while Kids Mode is active. Set `OMARCHY_KIDS_TEST_PASSWORD` only in a disposable guest to add wrong-password and valid-password checks.
+The optional `test/vm-acceptance` script runs the full flow in a disposable Omarchy VM.
