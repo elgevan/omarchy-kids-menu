@@ -271,14 +271,6 @@ function restoreBarLayout(config, restore, pluginId) {
     delete pluginLocation.entry[BAR_RESTORE_KEY]
 }
 
-function setStockMenuDisabled(config, disabled) {
-  var current = Array.isArray(config.disabledPlugins) ? config.disabledPlugins : []
-  var next = current.filter(function(id) { return String(id) !== STOCK_MENU_ID })
-  if (disabled) next.push(STOCK_MENU_ID)
-  if (next.length > 0) config.disabledPlugins = next
-  else delete config.disabledPlugins
-}
-
 function managerEntry(managerId, managerPath) {
   return { id: managerId, type: "qml", source: managerPath }
 }
@@ -356,9 +348,8 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled, ins
   } else if (barRestore) {
     restoreBarLayout(config, barRestore, pluginId)
     ensureManager(config, managerId, managerPath)
-  } else {
-    setStockMenuDisabled(config, false)
   }
+  // Outside Kids Mode, leave the user's disabled-plugin preferences intact.
   return {
     restore: restore,
     barRestore: kidsModeEnabled === true ? barRestore : null
@@ -380,9 +371,6 @@ function deactivate(config, pluginId, managerId, restoreValue, barRestoreValue) 
     var id = entryId(entry)
     return id !== pluginId && id !== managerId
   })
-  if (!barRestore || !("disabledPlugins" in barRestore))
-    setStockMenuDisabled(config, false)
-
   var restore = normalizedRestore(restoreValue)
   if (!restore) return
 
@@ -412,7 +400,6 @@ if (typeof module !== "undefined") {
     hiddenPluginIds: hiddenPluginIds,
     applyKidsPluginPolicy: applyKidsPluginPolicy,
     kidsPluginPolicyMatches: kidsPluginPolicyMatches,
-    setStockMenuDisabled: setStockMenuDisabled,
     activate: activate,
     deactivate: deactivate
   }

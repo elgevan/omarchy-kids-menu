@@ -428,6 +428,34 @@ integration.deactivate(
 assert.equal(integration.barLocation(noStockConfig, "omarchy.menu"), null)
 assert.deepEqual(noStockConfig.bar.layout, {left: [], center: [], right: []})
 
+// A user who disabled the stock menu must keep that preference through enable,
+// repeated shell syncs/reloads, Kids Mode exit, and removal while active.
+for (const stockPresent of [false, true]) {
+  for (const removalWhileActive of [false, true]) {
+    let disabledMenuConfig = {
+      bar: {layout: {
+        left: (stockPresent ? [{id: "omarchy.menu"}] : []).concat([{id: pluginId}]),
+        center: [], right: []
+      }},
+      plugins: [pluginId],
+      disabledPlugins: ["omarchy.menu", "omarchy.clock"]
+    }
+    const originalLayout = JSON.parse(JSON.stringify(disabledMenuConfig.bar.layout))
+    originalLayout.left = originalLayout.left.filter(entry => entry.id !== pluginId)
+    for (const active of [false, false, true, true, ...(removalWhileActive ? [] : [false, false])]) {
+      result = integration.activate(
+        disabledMenuConfig, pluginId, managerId, managerPath, active)
+      // Simulate loading the persisted shell configuration in a fresh instance.
+      disabledMenuConfig = JSON.parse(JSON.stringify(disabledMenuConfig))
+      assert.deepEqual(disabledMenuConfig.disabledPlugins, ["omarchy.menu", "omarchy.clock"])
+    }
+    integration.deactivate(
+      disabledMenuConfig, pluginId, managerId, result.restore, result.barRestore)
+    assert.deepEqual(disabledMenuConfig.disabledPlugins, ["omarchy.menu", "omarchy.clock"])
+    assert.deepEqual(disabledMenuConfig.bar.layout, originalLayout)
+  }
+}
+
 assert.equal(integration.normalizedBarRestore({left: [], center: []}), null)
 assert.equal(integration.normalizedBarRestore({left: [], center: [], right: "bad"}), null)
 NODE

@@ -1,6 +1,6 @@
-# Omarchy Kid Menu
+# Omarchy Kids Mode
 
-Omarchy Kid Menu makes it easier to share the Omarchy desktop you already use with a child. It does not create another Linux user or a separate desktop profile. Browser apps open in a separate Chromium profile, so the child does not see your regular browser history, bookmarks, or signed-in sites such as YouTube.
+Omarchy Kids Mode makes it easier to share the Omarchy desktop you already use with a child. It does not create another Linux user or a separate desktop profile. Chromium, Google Chrome, and supported Omarchy web apps launch in a separate Chromium profile, keeping that browsing separate from your regular history, bookmarks, and signed-in sites such as YouTube.
 
 When you start **Kids Mode**, your apps stay open but move out of view. The child starts on workspace 1 and sees only the apps you choose. Kids Mode also hides other visible shell plugins, simplifies the bar, pauses shortcuts that open other apps or settings, and turns on Do Not Disturb.
 
@@ -13,6 +13,8 @@ This is meant for supervised use on a shared account. It helps prevent accidenta
 ## Install
 
 You need Omarchy 4 with the Quattro shell and Chromium installed.
+
+Enabling the plugin replaces the stock menu widget with its Kids Mode counterpart and adds a Kids Mode button on the right side of the bar. The menu keeps its normal behavior until you start Kids Mode. Disabling or removing the plugin restores the original menu placement.
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
@@ -36,7 +38,9 @@ If a protection cannot be maintained or the saved mode state cannot be verified,
 
 ## Chromium profile
 
-Chromium, Google Chrome, and supported web apps use one separate browser profile while Kids Mode is active. Its bookmarks, history, extensions, settings, and sign-ins stay between sessions without mixing with your normal browser profile.
+Chromium, Google Chrome, and supported Omarchy web apps launch through Chromium with one separate browser profile while Kids Mode is active. Supported web apps are shortcuts that use `omarchy-launch-webapp` with an HTTP or HTTPS URL. The profile's bookmarks, history, extensions, settings, and sign-ins stay between sessions without mixing with your normal browser profile.
+
+Other browsers, including Firefox, and other selected applications use their normal launch behavior and retain access to their usual profiles and account data. Only select apps whose existing data you are comfortable sharing.
 
 The profile is shared by Kids Mode, not created separately for each child. It is stored at:
 
@@ -48,13 +52,15 @@ Kids Mode does not filter websites.
 
 ## Remove
 
+First exit Kids Mode and wait for your desktop to be restored. If an app asks for confirmation before closing, answer its prompt and retry **Exit Kids Mode**. Then remove the plugin:
+
 ```bash
 omarchy plugin remove io.github.elgevan.omarchy-kids
 ```
 
-Removing the plugin restores the normal desktop. Your chosen app list and Kids Mode browser profile are kept in case you install it again.
+Your chosen app list and Kids Mode browser profile are kept in case you install it again.
 
-If a Kids Mode app refuses to close, answer its prompt and try removing the plugin again. Signing out also closes any remaining session windows.
+If you remove the plugin while Kids Mode is active, desktop cleanup retries in the background after removal. If cleanup cannot finish, shortcut restrictions are released but some windows may remain hidden. Sign out and back in to recover the session; running the removal command again cannot retry cleanup for an already-removed plugin.
 
 ## Test
 
