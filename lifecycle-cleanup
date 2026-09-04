@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+WINDOW_SESSION=${1:?window-session path is required}
+SHORTCUT_POLICY=${2:?shortcut-policy path is required}
+SETTLE_SECONDS=${OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS:-2}
+RETRY_SECONDS=${OMARCHY_KIDS_CLEANUP_RETRY_SECONDS:-1}
+
+[[ -x $WINDOW_SESSION && -x $SHORTCUT_POLICY ]]
+[[ $SETTLE_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || SETTLE_SECONDS=2
+[[ $RETRY_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || RETRY_SECONDS=1
+
+# Component destruction cannot await a Process. Give any execDetached launch a
+# short mapping window, then retain the shortcut restrictions unless verified
+# window/workspace cleanup succeeds. Retries cover a client that maps during a
+# prior helper attempt and is returned to Kids Mode by compensation.
+sleep "$SETTLE_SECONDS"
+for attempt in 1 2 3; do
+  if "$WINDOW_SESSION" exit >/dev/null; then
+    exec "$SHORTCUT_POLICY" exit
+  fi
+  ((attempt < 3)) && sleep "$RETRY_SECONDS"
+done
+
+exit 1

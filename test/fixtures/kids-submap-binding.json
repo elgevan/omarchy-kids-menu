@@ -1,0 +1,9 @@
+[
+  {
+    "modmask": 64,
+    "key": "RETURN",
+    "submap": "omarchy-kids",
+    "submap_universal": false,
+    "description": "Custom terminal in the Kids submap"
+  }
+]

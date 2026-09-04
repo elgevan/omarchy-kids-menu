@@ -1,0 +1,22 @@
+[
+  {
+    "address": "0xaaa",
+    "mapped": true,
+    "workspace": {"name": "1"},
+    "class": "first",
+    "title": "First",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xbbb",
+    "mapped": true,
+    "workspace": {"name": "work"},
+    "class": "second",
+    "title": "Second",
+    "pinned": true,
+    "floating": true,
+    "fullscreen": 0
+  }
+]

@@ -22,6 +22,9 @@ Loader {
   readonly property bool kidsModeEnabled: root.allowlistService
     ? root.allowlistService.kidsModeEnabled === true
     : false
+  readonly property bool kidsModeActive: root.allowlistService
+    ? root.allowlistService.modePhase === "active"
+    : false
 
   readonly property string pluginRoot: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir)
@@ -72,7 +75,7 @@ Loader {
     }
 
     function launch(desktopId, name) {
-      if (!root.sourceAppLibrary) return
+      if (!root.sourceAppLibrary || !root.kidsModeActive) return
 
       var entry = filteredAppLibrary.entryFor(desktopId)
       var webAppUrl = KidsBrowser.webAppUrl(
@@ -145,14 +148,14 @@ Loader {
   }
 
   function launchKidsBrowser() {
-    if (!root.kidsModeEnabled) return "inactive"
+    if (!root.kidsModeActive) return "inactive"
     Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, ""))
     root.guardAppLaunch()
     return "ok"
   }
 
   function launchAllowedApp(payloadJson) {
-    if (!root.kidsModeEnabled || !root.allowlistService) return "inactive"
+    if (!root.kidsModeActive || !root.allowlistService) return "inactive"
 
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { return "invalid" }

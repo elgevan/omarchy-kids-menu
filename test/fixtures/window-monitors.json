@@ -1,0 +1,12 @@
+[
+  {
+    "name": "DP-1",
+    "focused": false,
+    "activeWorkspace": {"name": "1"}
+  },
+  {
+    "name": "DP-2",
+    "focused": true,
+    "activeWorkspace": {"name": "work"}
+  }
+]

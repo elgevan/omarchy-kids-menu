@@ -1,0 +1,9 @@
+[
+  {
+    "modmask": 64,
+    "key": "RETURN",
+    "submap": "",
+    "submap_universal": true,
+    "description": "Universal terminal"
+  }
+]

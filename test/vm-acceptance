@@ -16,6 +16,9 @@ MANAGER_ID=$PLUGIN_ID.manager
 RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
 RUNTIME_TOOL_DIR="$RUNTIME_ROOT/omarchy-kids/tools"
 SHORTCUT_MARKER="$RUNTIME_ROOT/omarchy-kids/shortcut-policy.active"
+kids_launched_address=""
+original_workspace=""
+original_monitor=""
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -90,7 +93,9 @@ plugin_absent() {
 }
 
 runtime_tools_ready() {
-  [[ -x $RUNTIME_TOOL_DIR/window-session && -x $RUNTIME_TOOL_DIR/shortcut-policy ]]
+  [[ -x $RUNTIME_TOOL_DIR/window-session \
+    && -x $RUNTIME_TOOL_DIR/shortcut-policy \
+    && -x $RUNTIME_TOOL_DIR/lifecycle-cleanup ]]
 }
 
 stock_menu_restored() {
@@ -199,16 +204,33 @@ youtube_window_with_kids_profile() {
   return 1
 }
 
-close_kids_youtube_window() {
-  local address
-  address=$(hyprctl -j clients | jq -r '
+kids_youtube_address() {
+  hyprctl -j clients | jq -er '
     .[]
     | select(.workspace.name == "omarchy-kids")
     | select((.class|ascii_downcase|contains("youtube")) or (.title|ascii_downcase|contains("youtube")))
     | .address
-  ' | head -1)
-  [[ -n $address ]] || return 0
-  hyprctl --quiet dispatch "hl.dsp.window.close({ window = \"address:$address\" })"
+  ' | head -1
+}
+
+client_workspace_is() {
+  local address=$1 workspace=$2
+  hyprctl -j clients | jq -e --arg address "$address" --arg workspace "$workspace" '
+    any(.[]; .address == $address and .workspace.name == $workspace)
+  '
+}
+
+active_context_is() {
+  local workspace=$1 monitor=$2
+  hyprctl -j activeworkspace | jq -e \
+    --arg workspace "$workspace" --arg monitor "$monitor" \
+    '.name == $workspace and (.monitor == $monitor or $monitor == "")'
+}
+
+kids_workspace_absent() {
+  hyprctl -j workspaces | jq -e '
+    all(.[]; .name != "omarchy-kids")
+  '
 }
 
 cleanup() {
@@ -244,6 +266,8 @@ wait_until "inactive mode leaves the stock menu available" 20 stock_menu_availab
 wait_until "inactive mode leaves the stock menu shortcut intact" 20 \
   binding_description_present "Omarchy menu"
 wait_until "cleanup helpers are staged outside the plugin checkout" 20 runtime_tools_ready
+original_workspace=$(hyprctl -j activeworkspace | jq -r '.name // "1"')
+original_monitor=$(hyprctl -j activeworkspace | jq -r '.monitor // ""')
 
 omarchy-shell "$MANAGER_ID" show
 wait_until "Kids Mode manager opens for first-run activation" 15 screen_contains "KIDS MODE"
@@ -360,8 +384,10 @@ if desktop_present YouTube && command -v chromium >/dev/null; then
   wait_until "kids root opens for web-app launch" 15 layer_present
   wtype YouTube -s 100 -k Return
   wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
-  close_kids_youtube_window
-  pass "Kids web-app window closed after profile check"
+  kids_launched_address=$(kids_youtube_address)
+  [[ $kids_launched_address =~ ^0x[0-9a-fA-F]+$ ]] \
+    || fail "capture the Kids-launched YouTube window"
+  pass "Kids web-app remains open for exit lifecycle coverage"
 else
   pass "Kids web-app profile check skipped (YouTube or Chromium absent)"
 fi
@@ -398,6 +424,13 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wtype "$OMARCHY_KIDS_TEST_PASSWORD" -s 750 -k Return
   wait_until "valid authentication unlocks the session" 20 lock_is false
   wait_until "valid authentication turns Kids Mode off" 20 mode_is off
+  wait_until "internal Off restores the original workspace and monitor" 20 \
+    active_context_is "$original_workspace" "$original_monitor"
+  wait_until "internal Off removes the named Kids workspace" 20 kids_workspace_absent
+  if [[ -n $kids_launched_address ]]; then
+    wait_until "internal Off evacuates the Kids-launched app" 20 \
+      client_workspace_is "$kids_launched_address" "$original_workspace"
+  fi
   wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
   wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
   wait_until "internal Off restores the stock menu shortcut" 20 \
@@ -475,6 +508,11 @@ wait_until "direct removal restores desktop-state shortcuts" 20 \
     "Monitor scaling up" "Toggle touchpad"
 wait_until "direct removal removes Kids shortcut bindings" 20 \
   binding_description_absent "Kids Mode: Menu"
+wait_until "direct removal removes the named Kids workspace" 20 kids_workspace_absent
+if [[ -n $kids_launched_address ]]; then
+  wait_until "direct removal preserves the Kids-launched app on the original workspace" 20 \
+    client_workspace_is "$kids_launched_address" "$original_workspace"
+fi
 [[ ! -e $SHORTCUT_MARKER ]] || fail "shortcut marker remains after plugin removal"
 [[ -z $(hyprctl configerrors) ]] || fail "Hyprland reports configuration errors after shortcut restore"
 pass "Hyprland shortcut restore is clean"

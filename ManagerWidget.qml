@@ -12,9 +12,9 @@ BarWidget {
     ? bar.shell.serviceFor("io.github.elgevan.omarchy-kids")
     : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-  readonly property bool kidsModeEnabled: allowlistService
-    ? allowlistService.kidsModeEnabled === true
-    : false
+  readonly property string modePhase: allowlistService
+    ? String(allowlistService.modePhase || "inactive")
+    : "inactive"
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false
@@ -60,8 +60,16 @@ BarWidget {
     text: ""
     slotSize: Style.bar.statusSlot
     opticalSize: Style.bar.iconCanvas
-    tooltipText: root.kidsModeEnabled ? "Kids Mode: On" : "Kids Mode: Off"
-    active: root.opened || root.kidsModeEnabled
+    tooltipText: root.modePhase === "active"
+      ? "Kids Mode: On"
+      : root.modePhase === "entering"
+        ? "Kids Mode: Starting…"
+        : root.modePhase === "exiting" || root.modePhase === "rollback"
+          ? "Kids Mode: Restoring…"
+          : root.modePhase === "error"
+            ? "Kids Mode: Needs attention"
+            : "Kids Mode: Off"
+    active: root.opened || root.modePhase === "active"
     onPressed: root.togglePanel()
   }
 }

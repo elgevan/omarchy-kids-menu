@@ -1,0 +1,12 @@
+[
+  {
+    "address": "0xaaa",
+    "mapped": true,
+    "workspace": {"name": "special:omarchy-kids-parent"},
+    "class": "first",
+    "title": "First",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  }
+]

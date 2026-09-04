@@ -25,6 +25,12 @@ Panel {
     : null
   readonly property bool allowlistEditable: root.service
     && root.service.allowlistEditable === true
+  readonly property string modePhase: root.service
+    ? String(root.service.modePhase || "inactive")
+    : "inactive"
+  readonly property bool modeActionEnabled: root.service && root.service.modeStateLoaded
+    && (root.modePhase === "inactive" || root.modePhase === "active"
+      || root.modePhase === "error")
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -108,10 +114,15 @@ Panel {
   }
 
   function toggleKidsMode() {
-    if (!root.service || !root.service.modeStateLoaded || root.service.windowSessionBusy) return
+    if (!root.service || !root.modeActionEnabled) return
     root.authError = ""
 
-    if (!root.service.kidsModeEnabled) {
+    if (root.modePhase === "error") {
+      root.service.retryTransition()
+      return
+    }
+
+    if (root.modePhase === "inactive") {
       root.service.setKidsModeEnabled(true)
       return
     }
@@ -142,6 +153,36 @@ Panel {
       root.lockObserved = false
       if (root.service) root.service.setKidsModeEnabled(false)
     }
+  }
+
+  function modeStatusLabel() {
+    if (root.modePhase === "entering") return "STARTING"
+    if (root.modePhase === "active") return "ACTIVE"
+    if (root.modePhase === "exiting" || root.modePhase === "rollback") return "RESTORING"
+    if (root.modePhase === "error") return "ATTENTION"
+    return "INACTIVE"
+  }
+
+  function modeActionLabel() {
+    if (root.modePhase === "entering") return "PREPARING KIDS MODE…"
+    if (root.modePhase === "exiting" || root.modePhase === "rollback")
+      return "RESTORING DESKTOP…"
+    if (root.modePhase === "error") return "RETRY RESTORE"
+    if (root.modePhase === "active") return "EXIT KIDS MODE"
+    return "START KIDS MODE"
+  }
+
+  function modeActionDetail() {
+    if (root.modePhase === "entering") return "Checking windows, shortcuts, shell, and notifications"
+    if (root.modePhase === "exiting" || root.modePhase === "rollback")
+      return "Restrictions remain until restoration succeeds"
+    if (root.modePhase === "error") return "Kids Mode restrictions are still in place"
+    if (root.modePhase === "active") {
+      return root.service.hiddenWindowCount > 0
+        ? "Authenticate to restore " + root.service.hiddenWindowCount + " windows"
+        : "Requires password or fingerprint"
+    }
+    return "Apply the app filter and mute notifications"
   }
 
   ListModel { id: appModel }
@@ -198,12 +239,12 @@ Panel {
             width: parent.width
             text: root.authError.length > 0
               ? root.authError
+              : root.service && root.service.modeTransitionError.length > 0
+                ? root.service.modeTransitionError
               : root.service && root.service.windowSessionError.length > 0
                 ? root.service.windowSessionError
-                : root.service && root.service.windowSessionBusy
-                  ? root.service.kidsModeEnabled
-                    ? "Hiding open windows…"
-                    : "Restoring hidden windows…"
+                : root.service && root.service.shortcutPolicyError.length > 0
+                  ? root.service.shortcutPolicyError
                   : ""
             visible: text.length > 0
             color: root.dim
@@ -218,20 +259,20 @@ Panel {
           implicitWidth: modeStatusText.implicitWidth + Style.space(18)
           implicitHeight: modeStatusText.implicitHeight + Style.space(9)
           radius: height / 2
-          color: root.service && root.service.kidsModeEnabled
+          color: root.modePhase === "active"
             ? Style.selectedFillFor(root.accent, root.accent)
             : Style.normalFillFor(root.foreground, root.accent)
           borderSpec: Border.controlSpec(
-            root.service && root.service.kidsModeEnabled ? "selected" : "normal",
-            root.service && root.service.kidsModeEnabled ? root.accent : root.foreground,
+            root.modePhase === "active" ? "selected" : "normal",
+            root.modePhase === "active" ? root.accent : root.foreground,
             root.accent
           )
 
           Text {
             id: modeStatusText
             anchors.centerIn: parent
-            text: root.service && root.service.kidsModeEnabled ? "ACTIVE" : "INACTIVE"
-            color: root.service && root.service.kidsModeEnabled ? root.accent : root.foreground
+            text: root.modeStatusLabel()
+            color: root.modePhase === "active" ? root.accent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
@@ -244,17 +285,17 @@ Panel {
         width: parent.width
         height: Style.space(46)
         radius: Style.cornerRadius
-        color: root.service && !root.service.kidsModeEnabled
+        color: root.modePhase === "inactive"
           ? Style.selectedFillFor(root.accent, root.accent)
           : modeActionMouse.containsMouse
             ? Style.hoverFillFor(root.accent, root.accent)
             : Style.normalFillFor(root.foreground, root.accent)
         borderSpec: Border.controlSpec(
-          root.service && !root.service.kidsModeEnabled ? "selected" : "normal",
-          root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground,
+          root.modePhase === "inactive" ? "selected" : "normal",
+          root.modePhase === "inactive" ? root.accent : root.foreground,
           root.accent
         )
-        opacity: root.service && root.service.modeStateLoaded && !root.service.windowSessionBusy ? 1 : 0.55
+        opacity: root.modeActionEnabled ? 1 : 0.55
 
         Column {
           anchors.left: parent.left
@@ -266,14 +307,8 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.windowSessionBusy
-              ? root.service.kidsModeEnabled
-                ? "PREPARING KIDS MODE…"
-                : "RESTORING WINDOWS…"
-              : root.service && root.service.kidsModeEnabled
-              ? "EXIT KIDS MODE"
-              : "START KIDS MODE"
-            color: root.service && !root.service.kidsModeEnabled ? root.accent : root.foreground
+            text: root.modeActionLabel()
+            color: root.modePhase === "inactive" ? root.accent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             font.bold: true
@@ -281,14 +316,8 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.windowSessionBusy
-              ? "Open apps remain running while they move"
-              : root.service && root.service.kidsModeEnabled
-              ? root.service.hiddenWindowCount > 0
-                ? "Authenticate to restore " + root.service.hiddenWindowCount + " windows"
-                : "Requires password or fingerprint"
-              : "Apply the app filter and mute notifications"
-            color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
+            text: root.modeActionDetail()
+            color: root.modePhase === "inactive" ? root.accent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
@@ -301,7 +330,7 @@ Panel {
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           text: "›"
-          color: root.service && !root.service.kidsModeEnabled ? root.accent : root.dim
+          color: root.modePhase === "inactive" ? root.accent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.heading
           font.bold: true
@@ -310,7 +339,7 @@ Panel {
         MouseArea {
           id: modeActionMouse
           anchors.fill: parent
-          enabled: root.service && root.service.modeStateLoaded && !root.service.windowSessionBusy
+          enabled: root.modeActionEnabled
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: root.toggleKidsMode()

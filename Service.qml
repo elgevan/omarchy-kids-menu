@@ -19,23 +19,36 @@ Item {
   property var allowedDesktopIds: Allowlist.defaultIds()
   property bool directoryReady: false
   property bool runtimeToolsReady: false
+  property bool runtimeToolsFailed: false
+  property bool activationWaitingForTools: false
   property bool writePending: false
   property bool kidsModeEnabled: false
+  property string modePhase: "inactive"
+  property string modeTransitionError: ""
+  property bool modeEffectsDesired: false
+  property bool controlReleaseStarted: false
   property bool modeStateLoaded: false
   property bool modeWritePending: false
   property bool notificationStateLoaded: false
   property bool notificationStateManaged: false
   property bool notificationRestoreDnd: false
   property bool notificationApplied: false
+  property bool notificationPolicySynced: false
   property int notificationSetupAttempts: 0
   property int hiddenWindowCount: 0
   property bool windowSessionBusy: false
   property string windowSessionError: ""
   property bool windowSessionDesired: false
+  property bool windowSessionApplied: false
+  property bool windowSessionSynced: false
   property int windowGuardAttemptsRemaining: 0
   property var stockMenuRestore: null
   property bool shellIntegrationReady: false
+  property bool shellModeApplied: false
+  property bool shellPolicySynced: false
+  property int shellSetupAttempts: 0
   property bool shortcutPolicyApplied: false
+  property bool shortcutPolicySynced: false
   property bool shortcutPolicyBusy: false
   property string shortcutPolicyError: ""
   property string shortcutPolicyDesiredSignature: ""
@@ -58,6 +71,8 @@ Item {
     && root.notificationService
     && root.notificationService.doNotDisturb === true
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
+  readonly property bool modeTransitionBusy: root.modePhase === "entering"
+    || root.modePhase === "exiting" || root.modePhase === "rollback"
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
     : "io.github.elgevan.omarchy-kids"
@@ -71,11 +86,17 @@ Item {
   readonly property string sourceShortcutPolicyTool: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/shortcut-policy"
     : ""
+  readonly property string sourceLifecycleCleanupTool: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) + "/lifecycle-cleanup"
+    : ""
   readonly property string windowSessionTool: runtimeToolsReady
     ? runtimeToolDir + "/window-session"
     : ""
   readonly property string shortcutPolicyTool: runtimeToolsReady
     ? runtimeToolDir + "/shortcut-policy"
+    : ""
+  readonly property string lifecycleCleanupTool: runtimeToolsReady
+    ? runtimeToolDir + "/lifecycle-cleanup"
     : ""
 
   signal allowlistChanged()
@@ -83,14 +104,17 @@ Item {
 
   function prepareRuntimeTools() {
     if (!root.directoryReady || !root.sourceWindowSessionTool
-        || !root.sourceShortcutPolicyTool || stageRuntimeTools.running)
+        || !root.sourceShortcutPolicyTool || !root.sourceLifecycleCleanupTool
+        || stageRuntimeTools.running)
       return
 
     root.runtimeToolsReady = false
+    root.runtimeToolsFailed = false
     stageRuntimeTools.command = [
       "cp", "--",
       root.sourceWindowSessionTool,
       root.sourceShortcutPolicyTool,
+      root.sourceLifecycleCleanupTool,
       root.runtimeToolDir
     ]
     stageRuntimeTools.running = true
@@ -170,26 +194,202 @@ Item {
 
   function loadModeState(rawText) {
     var enabled = ModeState.parseEnabled(rawText)
-    var changed = root.kidsModeEnabled !== enabled
-    root.kidsModeEnabled = enabled
+    var firstLoad = !root.modeStateLoaded
     root.modeStateLoaded = true
-    if (changed) root.kidsModeChanged()
+    if (firstLoad) {
+      if (enabled) root.beginActivation()
+      else root.initializeInactiveMode()
+      return
+    }
+
+    // Ignore our own committed writes, but continue to honor an external state
+    // change using the same transactional path as the panel.
+    if (enabled && !root.kidsModeEnabled && root.modePhase === "inactive")
+      root.beginActivation()
+    else if (!enabled && root.kidsModeEnabled && root.modePhase === "active")
+      root.beginDeactivation()
+  }
+
+  function setKidsModeEnabled(enabled) {
+    var next = enabled !== false
+    if (!root.modeStateLoaded) return
+    if (next && !root.kidsModeEnabled && root.modePhase === "inactive")
+      root.beginActivation()
+    else if (!next && root.kidsModeEnabled && root.modePhase === "active")
+      root.beginDeactivation()
+  }
+
+  function setEffectiveMode(enabled) {
+    var next = enabled === true
+    if (root.kidsModeEnabled === next) return
+    root.kidsModeEnabled = next
+    root.kidsModeChanged()
+  }
+
+  function initializeInactiveMode() {
+    root.modePhase = "inactive"
+    root.modeEffectsDesired = false
+    root.controlReleaseStarted = false
+    root.setEffectiveMode(false)
+    root.windowSessionDesired = false
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
     root.scheduleShellIntegration()
     root.scheduleShortcutPolicySync()
   }
 
-  function setKidsModeEnabled(enabled) {
-    var next = enabled !== false
-    if (!root.modeStateLoaded || root.kidsModeEnabled === next) return
-    root.kidsModeEnabled = next
-    root.kidsModeChanged()
-    root.persistModeState()
+  function beginActivation() {
+    if (!root.modeStateLoaded || root.modePhase !== "inactive") return
+    root.modeTransitionError = ""
+    root.windowSessionError = ""
+    root.shortcutPolicyError = ""
+    root.modePhase = "entering"
+    root.modeEffectsDesired = false
+    root.controlReleaseStarted = false
+    root.activationWaitingForTools = !root.runtimeToolsReady
+    root.setEffectiveMode(true)
+    if (!root.runtimeToolsReady) {
+      root.prepareRuntimeTools()
+      if (root.runtimeToolsFailed)
+        root.abortPendingActivation("Could not prepare runtime helpers")
+      return
+    }
+    root.startActivationEffects()
+  }
+
+  function startActivationEffects() {
+    if (root.modePhase !== "entering" || !root.runtimeToolsReady) return
+    root.activationWaitingForTools = false
+    root.modeEffectsDesired = true
+    root.notificationPolicySynced = false
+    root.windowSessionSynced = false
+    root.shellPolicySynced = false
+    root.shortcutPolicySynced = false
+    root.windowSessionDesired = true
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
     root.scheduleShellIntegration()
     root.scheduleShortcutPolicySync()
+  }
+
+  function abortPendingActivation(message) {
+    if (root.modePhase !== "entering" || !root.activationWaitingForTools) return
+    root.modeTransitionError = message || "Could not start Kids Mode"
+    root.activationWaitingForTools = false
+    root.modeEffectsDesired = false
+    root.windowSessionDesired = false
+    root.setEffectiveMode(false)
+    root.modePhase = "inactive"
+    root.persistModeState()
+  }
+
+  function beginDeactivation() {
+    if (!root.modeStateLoaded || root.modePhase !== "active") return
+    root.modeTransitionError = ""
+    root.windowSessionError = ""
+    root.shortcutPolicyError = ""
+    root.modePhase = "exiting"
+    root.controlReleaseStarted = false
+    root.windowSessionDesired = false
+    root.windowSessionSynced = false
+    // Restore windows before relaxing the menu, shortcut, and DND controls.
+    // If an app launch is still inside its existing two-pass guard window,
+    // let that window settle before the exit helper snapshots Kids clients.
+    if (!root.windowLaunchGuardPending()) root.scheduleWindowSessionSync()
+  }
+
+  function rollbackActivation(message) {
+    if (root.modePhase !== "entering" && root.modePhase !== "active") return
+    root.modeTransitionError = message || "Could not start Kids Mode"
+    root.activationWaitingForTools = false
+    root.modePhase = "rollback"
+    root.controlReleaseStarted = false
+    root.windowSessionDesired = false
+    root.windowSessionSynced = false
+    if (!root.windowSessionTool && !windowSessionEnter.running
+        && !root.windowSessionApplied) {
+      root.windowSessionSynced = true
+      root.startControlRelease()
+      return
+    }
+    if (!root.windowSessionTool) {
+      root.modePhase = "error"
+      return
+    }
+    root.scheduleWindowSessionSync()
+  }
+
+  function startControlRelease() {
+    if (root.modePhase !== "exiting" && root.modePhase !== "rollback") return
+    root.controlReleaseStarted = true
+    root.modeEffectsDesired = false
+    root.notificationPolicySynced = false
+    root.shellPolicySynced = false
+    root.shortcutPolicySynced = false
+    if (!root.shortcutPolicyTool && !root.shortcutPolicyApplied)
+      root.shortcutPolicySynced = true
+    root.scheduleNotificationSetup()
+    root.scheduleShellIntegration()
+    root.scheduleShortcutPolicySync()
+    root.maybeCompleteDeactivation()
+  }
+
+  function failDeactivation(message) {
+    if (root.modePhase !== "exiting" && root.modePhase !== "rollback") return
+    root.modeTransitionError = message || "Could not restore the desktop"
+    root.modePhase = "error"
+  }
+
+  function retryTransition() {
+    if (root.modePhase !== "error" || !root.kidsModeEnabled) return
+    root.modeTransitionError = ""
+    root.windowSessionError = ""
+    root.shortcutPolicyError = ""
+    root.modePhase = "exiting"
+    root.controlReleaseStarted = false
+    root.windowSessionDesired = false
+    root.windowSessionSynced = false
+    if (!root.windowSessionTool && !root.windowSessionApplied) {
+      root.windowSessionSynced = true
+      root.startControlRelease()
+      return
+    }
+    if (!root.windowSessionTool) {
+      root.modePhase = "error"
+      root.modeTransitionError = "Runtime helpers are not available yet"
+      return
+    }
+    root.scheduleWindowSessionSync()
+  }
+
+  function maybeCompleteActivation() {
+    if (root.modePhase !== "entering") return
+    if (!root.notificationPolicySynced || !root.notificationsMuted
+        || !root.windowSessionSynced || !root.windowSessionApplied
+        || !root.shellPolicySynced || !root.shellModeApplied
+        || !root.shortcutPolicySynced || !root.shortcutPolicyApplied)
+      return
+
+    root.modePhase = "active"
+    root.persistModeState()
+  }
+
+  function maybeCompleteDeactivation() {
+    if ((root.modePhase !== "exiting" && root.modePhase !== "rollback")
+        || !root.controlReleaseStarted)
+      return
+    if (!root.notificationPolicySynced || root.notificationApplied
+        || !root.windowSessionSynced || root.windowSessionApplied
+        || !root.shellPolicySynced || root.shellModeApplied
+        || !root.shortcutPolicySynced || root.shortcutPolicyApplied)
+      return
+
+    var preserveError = root.modePhase === "rollback"
+    root.setEffectiveMode(false)
+    root.modePhase = "inactive"
+    root.controlReleaseStarted = false
+    root.persistModeState()
+    if (!preserveError) root.modeTransitionError = ""
   }
 
   function persistModeState() {
@@ -217,7 +417,7 @@ Item {
 
   function applyNotificationPolicy() {
     var notifications = root.notificationService
-    if (!root.kidsModeEnabled || !root.directoryReady || !root.notificationStateLoaded || !notifications
+    if (!root.modeEffectsDesired || !root.directoryReady || !root.notificationStateLoaded || !notifications
         || notifications.settingsLoaded !== true)
       return false
 
@@ -231,6 +431,9 @@ Item {
 
     notifications.setDoNotDisturb(true)
     root.notificationApplied = true
+    if (notifications.doNotDisturb !== true) return false
+    root.notificationPolicySynced = true
+    root.maybeCompleteActivation()
     return true
   }
 
@@ -242,6 +445,8 @@ Item {
   function releaseNotificationPolicy() {
     if (!root.notificationStateLoaded || !root.notificationStateManaged) {
       root.notificationApplied = false
+      root.notificationPolicySynced = true
+      root.maybeCompleteDeactivation()
       return true
     }
     var notifications = root.notificationService
@@ -250,19 +455,21 @@ Item {
       return false
     }
 
-    // Clear our ownership marker first. A future enable will then capture the
-    // user's current DND preference as a fresh restore point.
+    notifications.setDoNotDisturb(root.notificationRestoreDnd)
+    if (notifications.doNotDisturb !== root.notificationRestoreDnd) return false
+
     notificationStateFile.setText(NotificationState.stateText(false, false))
     root.notificationStateManaged = false
     root.notificationApplied = false
-    notifications.setDoNotDisturb(root.notificationRestoreDnd)
+    root.notificationPolicySynced = true
+    root.maybeCompleteDeactivation()
     return true
   }
 
   function syncModeEffects() {
     if (!root.modeStateLoaded || !root.notificationStateLoaded || !root.directoryReady)
       return false
-    return root.kidsModeEnabled
+    return root.modeEffectsDesired
       ? root.applyNotificationPolicy()
       : root.releaseNotificationPolicy()
   }
@@ -278,7 +485,6 @@ Item {
 
   function scheduleWindowSessionSync() {
     if (!root.modeStateLoaded || !root.windowSessionTool) return
-    root.windowSessionDesired = root.kidsModeEnabled
     windowSessionSync.restart()
   }
 
@@ -296,15 +502,48 @@ Item {
   function finishWindowSession(action, exitCode, output) {
     var result = root.parseWindowSessionOutput(output)
     root.windowSessionBusy = false
+    var status = result ? String(result.status || "") : ""
+    var enteringSucceeded = action === "enter" && exitCode === 0
+      && (status === "active" || status === "already-active")
+    var restoredSession = status === "restored"
+      && result.workspaceRemoved === true
+      && Number(result.kidsRemaining || 0) === 0
+    var staleSession = status === "stale-session"
+      && result.workspaceRemoved === true
+      && Number(result.kidsRemaining || 0) === 0
+    var alreadyInactive = status === "inactive" && !root.windowSessionApplied
+      && result.workspaceRemoved === true
+      && Number(result.kidsRemaining || 0) === 0
+    var exitingSucceeded = action === "exit" && exitCode === 0
+      && (restoredSession || staleSession || alreadyInactive)
 
-    if (exitCode !== 0 || !result) {
+    if (!enteringSucceeded && !exitingSucceeded) {
       root.windowSessionError = action === "enter"
         ? "Could not hide existing windows"
         : "Could not restore hidden windows"
+      if (result && Number(result.failed || 0) > 0)
+        root.windowSessionError += " (" + Number(result.failed) + " failed)"
+      if (action === "enter") {
+        // enter-failed means the helper retained an active snapshot so the
+        // rollback path can recover every window it touched.
+        root.windowSessionApplied = status === "enter-failed"
+          || status === "incomplete-session"
+        if (root.modePhase === "entering")
+          root.rollbackActivation(root.windowSessionError)
+      } else {
+        root.windowSessionApplied = true
+        root.failDeactivation(root.windowSessionError)
+      }
     } else if (action === "enter") {
       root.hiddenWindowCount = Math.max(0, Number(result.hidden || 0))
+      root.windowSessionApplied = true
+      root.windowSessionSynced = true
+      root.maybeCompleteActivation()
     } else {
       root.hiddenWindowCount = 0
+      root.windowSessionApplied = false
+      root.windowSessionSynced = true
+      root.startControlRelease()
     }
 
     if ((action === "enter") !== root.windowSessionDesired)
@@ -318,6 +557,11 @@ Item {
     windowGuardTimer.restart()
   }
 
+  function windowLaunchGuardPending() {
+    return root.windowGuardAttemptsRemaining > 0
+      || windowGuardTimer.running || windowSessionGuard.running
+  }
+
   function shortcutAllowed(ids) {
     for (var i = 0; i < ids.length; i++) {
       if (root.isAllowed(ids[i])) return true
@@ -326,7 +570,7 @@ Item {
   }
 
   function shortcutPolicySignature() {
-    if (!root.kidsModeEnabled) return "off"
+    if (!root.modeEffectsDesired) return "off"
     return "on:"
       + (root.shortcutAllowed(["chromium", "google-chrome", "google-chrome-stable"]) ? "1" : "0")
       + (root.isAllowed("omawrite") ? "1" : "0")
@@ -366,15 +610,28 @@ Item {
   function finishShortcutPolicy(action, exitCode, output) {
     var result = root.parseWindowSessionOutput(output)
     root.shortcutPolicyBusy = false
+    var succeeded = exitCode === 0 && result
+      && ((action === "enter" && result.applied === true)
+        || (action === "exit" && result.applied === false))
 
-    if (exitCode !== 0 || !result) {
+    if (!succeeded) {
       root.shortcutPolicyError = action === "enter"
         ? "Could not filter keyboard shortcuts"
         : "Could not restore keyboard shortcuts"
-      root.shortcutPolicyApplied = action === "exit"
+      if (result && result.error) root.shortcutPolicyError = String(result.error)
+      if (action === "enter") {
+        root.shortcutPolicyApplied = false
+        if (root.modePhase === "entering")
+          root.rollbackActivation(root.shortcutPolicyError)
+      } else {
+        root.shortcutPolicyApplied = true
+        root.failDeactivation(root.shortcutPolicyError)
+      }
     } else {
-      root.shortcutPolicyApplied = action === "enter" && result.applied === true
-      if (result.error) root.shortcutPolicyError = String(result.error)
+      root.shortcutPolicyApplied = action === "enter"
+      root.shortcutPolicySynced = true
+      if (action === "enter") root.maybeCompleteActivation()
+      else root.maybeCompleteDeactivation()
     }
 
     if (root.shortcutPolicyRunningSignature !== root.shortcutPolicyDesiredSignature)
@@ -382,6 +639,7 @@ Item {
   }
 
   function scheduleShellIntegration() {
+    root.shellSetupAttempts = 0
     shellIntegrationSetup.restart()
   }
 
@@ -389,24 +647,34 @@ Item {
     if (!root.modeStateLoaded || !root.shell
         || typeof root.shell.mutateShellConfig !== "function"
         || !root.managerWidgetPath || !root.pluginId)
-      return
+      return false
 
-    // The stock menu is deliberately unavailable while Kids Mode is active:
-    // without clonedFrom, its IPC route cannot be redirected safely.
-    if (root.kidsModeEnabled && typeof root.shell.hide === "function")
-      root.shell.hide(ShellIntegration.STOCK_MENU_ID)
+    try {
+      // The stock menu is deliberately unavailable while Kids Mode is active:
+      // without clonedFrom, its IPC route cannot be redirected safely.
+      if (root.modeEffectsDesired && typeof root.shell.hide === "function")
+        root.shell.hide(ShellIntegration.STOCK_MENU_ID)
 
-    root.shell.mutateShellConfig(function(config) {
-      var result = ShellIntegration.activate(
-        config,
-        root.pluginId,
-        root.managerWidgetId,
-        root.managerWidgetPath,
-        root.kidsModeEnabled
-      )
-      if (result && result.restore) root.stockMenuRestore = result.restore
-    })
-    root.shellIntegrationReady = true
+      root.shell.mutateShellConfig(function(config) {
+        var result = ShellIntegration.activate(
+          config,
+          root.pluginId,
+          root.managerWidgetId,
+          root.managerWidgetPath,
+          root.modeEffectsDesired
+        )
+        if (result && result.restore) root.stockMenuRestore = result.restore
+      })
+      root.shellIntegrationReady = true
+      root.shellModeApplied = root.modeEffectsDesired
+      root.shellPolicySynced = true
+      if (root.modeEffectsDesired) root.maybeCompleteActivation()
+      else root.maybeCompleteDeactivation()
+      return true
+    } catch (error) {
+      console.warn("omarchy-kids: could not update shell integration: " + error)
+      return false
+    }
   }
 
   function releaseShellIntegration() {
@@ -415,6 +683,8 @@ Item {
       ShellIntegration.deactivate(config, root.managerWidgetId, root.stockMenuRestore)
     })
     root.shellIntegrationReady = false
+    root.shellModeApplied = false
+    root.shellPolicySynced = true
   }
 
   FileView {
@@ -460,6 +730,11 @@ Item {
         root.flushModeWrite()
         root.scheduleNotificationSetup()
         root.prepareRuntimeTools()
+      } else if (root.modePhase === "entering") {
+        if (root.activationWaitingForTools)
+          root.abortPendingActivation("Could not prepare Kids Mode state directories")
+        else
+          root.rollbackActivation("Could not prepare Kids Mode state directories")
       }
     }
   }
@@ -469,12 +744,23 @@ Item {
     command: []
     onExited: function(exitCode) {
       root.runtimeToolsReady = exitCode === 0
+      root.runtimeToolsFailed = exitCode !== 0
       if (root.runtimeToolsReady) {
-        root.scheduleWindowSessionSync()
-        root.scheduleShortcutPolicySync()
+        if (root.modePhase === "entering" && root.activationWaitingForTools)
+          root.startActivationEffects()
+        else {
+          root.scheduleWindowSessionSync()
+          root.scheduleShortcutPolicySync()
+        }
       } else {
         root.windowSessionError = "Could not prepare runtime helpers"
         root.shortcutPolicyError = "Could not prepare runtime helpers"
+        if (root.modePhase === "entering" && root.activationWaitingForTools)
+          root.abortPendingActivation("Could not prepare runtime helpers")
+        else if (root.modePhase === "entering")
+          root.rollbackActivation("Could not prepare runtime helpers")
+        else if (root.modePhase === "exiting" || root.modePhase === "rollback")
+          root.failDeactivation("Could not prepare runtime helpers")
       }
     }
   }
@@ -514,6 +800,9 @@ Item {
       if (root.windowGuardAttemptsRemaining > 0 && root.kidsModeEnabled) {
         windowGuardTimer.interval = 1200
         windowGuardTimer.restart()
+      } else if ((root.modePhase === "exiting" || root.modePhase === "rollback")
+          && !root.windowSessionDesired) {
+        root.scheduleWindowSessionSync()
       }
     }
   }
@@ -547,14 +836,31 @@ Item {
       } else if (root.notificationSetupAttempts >= 100) {
         console.warn("omarchy-kids: notification service was not ready")
         stop()
+        if (root.modePhase === "entering" || root.modePhase === "active")
+          root.rollbackActivation("Could not mute notifications")
+        else if (root.modePhase === "exiting" || root.modePhase === "rollback")
+          root.failDeactivation("Could not restore notification settings")
       }
     }
   }
 
   Timer {
     id: shellIntegrationSetup
-    interval: 0
-    onTriggered: root.syncShellIntegration()
+    interval: 100
+    repeat: true
+    onTriggered: {
+      root.shellSetupAttempts++
+      if (root.syncShellIntegration()) {
+        stop()
+      } else if (root.shellSetupAttempts >= 100) {
+        console.warn("omarchy-kids: shell integration was not ready")
+        stop()
+        if (root.modePhase === "entering" || root.modePhase === "active")
+          root.rollbackActivation("Could not update the Omarchy shell")
+        else if (root.modePhase === "exiting" || root.modePhase === "rollback")
+          root.failDeactivation("Could not restore the Omarchy shell")
+      }
+    }
   }
 
   Timer {
@@ -586,6 +892,10 @@ Item {
     root.prepareRuntimeTools()
   }
   onNotificationServiceChanged: root.scheduleNotificationSetup()
+  onNotificationsMutedChanged: {
+    if (root.modeEffectsDesired && !root.notificationsMuted)
+      root.scheduleNotificationSetup()
+  }
 
   Component.onCompleted: {
     ensureDirectory.running = true
@@ -599,10 +909,18 @@ Item {
     if (root.pluginRegistry && !root.pluginRegistry.isEnabled(root.pluginId)) {
       root.releaseNotificationPolicy()
       root.releaseShellIntegration()
-      if (root.windowSessionTool)
-        Quickshell.execDetached([root.windowSessionTool, "exit"])
-      if (root.shortcutPolicyTool)
-        Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
+      if (root.lifecycleCleanupTool && root.windowSessionTool && root.shortcutPolicyTool) {
+        Quickshell.execDetached([
+          root.lifecycleCleanupTool,
+          root.windowSessionTool,
+          root.shortcutPolicyTool
+        ])
+      } else {
+        if (root.windowSessionTool)
+          Quickshell.execDetached([root.windowSessionTool, "exit"])
+        if (root.shortcutPolicyTool)
+          Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
+      }
     }
   }
 }

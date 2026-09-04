@@ -1,0 +1,6 @@
+[
+  {"id": 1, "name": "1", "monitor": "DP-1"},
+  {"id": 2, "name": "work", "monitor": "DP-2"},
+  {"id": 3, "name": "other", "monitor": "DP-1"},
+  {"id": -1337, "name": "omarchy-kids", "monitor": "DP-1"}
+]

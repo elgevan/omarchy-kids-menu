@@ -8,10 +8,12 @@ MENU="$PLUGIN_ROOT/kids-menu.jsonc"
 EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
 WINDOW_SESSION="$PLUGIN_ROOT/window-session"
 SHORTCUT_POLICY="$PLUGIN_ROOT/shortcut-policy"
+LIFECYCLE_CLEANUP="$PLUGIN_ROOT/lifecycle-cleanup"
 
 bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
   "$PLUGIN_ROOT/test/hyprctl-mock" "$PLUGIN_ROOT/test/keybindings-mock" \
-  "$WINDOW_SESSION" "$SHORTCUT_POLICY"
+  "$PLUGIN_ROOT/test/window-hyprctl-mock" \
+  "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -225,22 +227,441 @@ NODE
 
 [[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
 [[ -x $SHORTCUT_POLICY ]] || fail "shortcut-policy helper is not executable"
+[[ -x $LIFECYCLE_CLEANUP ]] || fail "lifecycle-cleanup helper is not executable"
 rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q '"cp", "--"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'id: stageRuntimeTools' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'windowSessionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
 window_test_dir=$(mktemp -d)
+window_log=$window_test_dir/hyprctl.log
+window_mock=$PLUGIN_ROOT/test/window-hyprctl-mock
+window_clients=$PLUGIN_ROOT/test/fixtures/window-clients.json
+window_clients_missing=$PLUGIN_ROOT/test/fixtures/window-clients-missing.json
+window_clients_missing_restored=$PLUGIN_ROOT/test/fixtures/window-clients-missing-restored.json
+window_clients_kids=$PLUGIN_ROOT/test/fixtures/window-clients-kids.json
+window_clients_misdirected=$PLUGIN_ROOT/test/fixtures/window-clients-misdirected.json
+window_clients_restored=$PLUGIN_ROOT/test/fixtures/window-clients-restored.json
+window_active=$PLUGIN_ROOT/test/fixtures/window-active.json
+window_workspace=$PLUGIN_ROOT/test/fixtures/window-workspace.json
+window_monitors=$PLUGIN_ROOT/test/fixtures/window-monitors.json
+window_monitors_hotplug=$PLUGIN_ROOT/test/fixtures/window-monitors-hotplug.json
+window_workspaces=$PLUGIN_ROOT/test/fixtures/window-workspaces.json
+window_workspaces_kids=$PLUGIN_ROOT/test/fixtures/window-workspaces-kids.json
+window_workspace_fallback=$PLUGIN_ROOT/test/fixtures/window-workspace-fallback.json
+export OMARCHY_KIDS_TEST_MONITORS=$window_monitors
+export OMARCHY_KIDS_TEST_WORKSPACES=$window_workspaces
 window_status=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_test_dir" \
     "$WINDOW_SESSION" status
 )
-rm -rf -- "$window_test_dir"
 jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper does not report a clean inactive state"
+
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+    "$WINDOW_SESSION" enter
+)
+jq -e '.action == "enter" and .status == "active" and .hidden == 2
+  and .expected == 2 and .failed == 0' <<< "$window_result" >/dev/null \
+  && jq -e '.originalActiveWorkspace == "work"
+    and .originalActiveMonitor == "DP-2"' \
+    "$window_test_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper does not confirm every hidden window"
+
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+    OMARCHY_KIDS_TEST_FAIL_MOVE_ADDRESS=0xbbb \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper accepts a partial restore"
+fi
+jq -e '.action == "exit" and .status == "restore-failed"
+  and .restored == 0 and .failed > 0' <<< "$window_result" >/dev/null \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_test_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper does not retain a failed restore for retry"
+[[ $(rg -c 'special:omarchy-kids-parent.*address:0xaaa' "$window_log") -ge 2 ]] \
+  || fail "window-session helper does not compensate a partial restore"
+
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+    "$WINDOW_SESSION" enter
+); then
+  fail "window-session helper accepts an incomplete active snapshot"
+fi
+jq -e '.action == "enter" and .status == "incomplete-session"
+  and .failed == 1' <<< "$window_result" >/dev/null \
+  || fail "window-session helper does not reject an incomplete active snapshot"
+
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.action == "exit" and .status == "restored" and .restored == 2
+  and .missing == 0 and .failed == 0' <<< "$window_result" >/dev/null \
+  && jq -e '.active == false and .status == "restored"' \
+    "$window_test_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper cannot complete a retried restore"
+
+window_focus_dir=$(mktemp -d)
+focus_log=$window_focus_dir/hyprctl.log
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_focus_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$focus_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_focus_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$focus_log" \
+    OMARCHY_KIDS_TEST_FAIL_WINDOW_FOCUS=true \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper accepts an original-window focus failure"
+fi
+jq -e '.status == "restore-failed" and .failed > 0' \
+  <<< "$window_result" >/dev/null \
+  && tail -n 1 "$focus_log" | rg -Fq 'workspace = "name:omarchy-kids"' \
+  || fail "window-session helper does not return to Kids workspace after compensation"
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_focus_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$focus_log" \
+  "$WINDOW_SESSION" exit >/dev/null
+rm -rf -- "$window_focus_dir"
+
+window_missing_dir=$(mktemp -d)
+missing_marker=$window_missing_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_missing_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_missing_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_missing" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_missing_restored" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$missing_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "restored" and .expected == 2 and .live == 1
+  and .restored == 1 and .missing == 1 and .failed == 0
+  and .kidsRemaining == 0 and .workspaceRemoved == true' \
+  <<< "$window_result" >/dev/null \
+  || fail "window-session helper does not distinguish closed windows from restore failures"
+
+window_multi_dir=$(mktemp -d)
+multi_log=$window_multi_dir/hyprctl.log
+multi_marker=$window_multi_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_multi_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$multi_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_multi_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$multi_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$multi_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "restored" and .expected == 2 and .restored == 2
+  and .evacuated == 2 and .kidsRemaining == 0
+  and .workspaceRemoved == true and .failed == 0' \
+  <<< "$window_result" >/dev/null \
+  && jq -e '.active == false and .status == "restored"
+    and .originalActiveMonitor == "DP-2" and .workspaceRemoved == true' \
+    "$window_multi_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper does not evacuate Kids-launched windows"
+rg -q 'workspace = "name:work".*address:0xccc' "$multi_log" \
+  && rg -q 'workspace = "name:work".*address:0xddd' "$multi_log" \
+  && ! rg -Fq 'address:0xeee' "$multi_log" \
+  || fail "window-session helper evacuates the wrong post-entry windows"
+monitor_focus_line=$(rg -nF 'hl.dsp.focus({ monitor = "DP-2" })' "$multi_log" \
+  | tail -1 | cut -d: -f1)
+workspace_focus_line=$(rg -nF 'hl.dsp.focus({ workspace = "name:work" })' "$multi_log" \
+  | tail -1 | cut -d: -f1)
+[[ -n $monitor_focus_line && -n $workspace_focus_line \
+    && $monitor_focus_line -lt $workspace_focus_line ]] \
+  || fail "window-session helper does not restore the original monitor before its workspace"
+
+window_residual_dir=$(mktemp -d)
+residual_log=$window_residual_dir/hyprctl.log
+residual_marker=$window_residual_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_residual_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$residual_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_residual_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$residual_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$residual_log" \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper accepts a residual Kids workspace"
+fi
+jq -e '.status == "restore-failed" and .workspaceRemoved == false
+  and .evacuated == 2 and .failed > 0' <<< "$window_result" >/dev/null \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_residual_dir/omarchy-kids/windows.json" >/dev/null \
+  && rg -q 'workspace = "name:omarchy-kids".*address:0xccc' "$residual_log" \
+  && rg -q 'workspace = "name:omarchy-kids".*address:0xddd' "$residual_log" \
+  || fail "window-session helper does not compensate a failed disappearance check"
+
+window_misdirected_dir=$(mktemp -d)
+misdirected_log=$window_misdirected_dir/hyprctl.log
+misdirected_marker=$window_misdirected_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_misdirected_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$misdirected_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_misdirected_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_misdirected" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$misdirected_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$misdirected_log" \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper trusts successful but misdirected dispatches"
+fi
+jq -e '.status == "restore-failed" and .kidsRemaining == 0
+  and .workspaceRemoved == false and .failed > 0' <<< "$window_result" >/dev/null \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_misdirected_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper does not verify final workspace and pin state"
+
+window_legacy_dir=$(mktemp -d)
+legacy_log=$window_legacy_dir/hyprctl.log
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_legacy_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$legacy_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+legacy_state=$window_legacy_dir/omarchy-kids/windows.json
+legacy_state_tmp=$window_legacy_dir/omarchy-kids/windows.legacy
+jq 'del(.originalActiveMonitor)' "$legacy_state" > "$legacy_state_tmp"
+mv -- "$legacy_state_tmp" "$legacy_state"
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_legacy_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$legacy_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "restored" and .workspaceRemoved == true' \
+  <<< "$window_result" >/dev/null \
+  && ! rg -Fq 'hl.dsp.focus({ monitor = ' "$legacy_log" \
+  || fail "window-session helper breaks a legacy version-1 snapshot"
+
+window_hotplug_dir=$(mktemp -d)
+hotplug_log=$window_hotplug_dir/hyprctl.log
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_hotplug_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$hotplug_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_hotplug_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace_fallback" \
+    OMARCHY_KIDS_TEST_MONITORS="$window_monitors_hotplug" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$hotplug_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "restored" and .workspaceRemoved == true' \
+  <<< "$window_result" >/dev/null \
+  && ! rg -Fq 'hl.dsp.focus({ monitor = "DP-2" })' "$hotplug_log" \
+  || fail "window-session helper cannot fall back after the original monitor disappears"
+
+window_stale_dir=$(mktemp -d)
+stale_log=$window_stale_dir/hyprctl.log
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_stale_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=restarted-instance \
+    XDG_STATE_HOME="$window_stale_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper accepts an unverified stale session"
+fi
+jq -e '.status == "restore-failed" and .workspaceRemoved == false
+  and .kidsRemaining == 3' <<< "$window_result" >/dev/null \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_stale_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper does not retain a stale session with Kids state"
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=restarted-instance \
+    XDG_STATE_HOME="$window_stale_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "stale-session" and .workspaceRemoved == true
+  and .kidsRemaining == 0 and .failed == 0' <<< "$window_result" >/dev/null \
+  && jq -e '.active == false and .status == "stale-session"' \
+    "$window_stale_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "window-session helper cannot verify a clean restarted compositor"
+
+window_cleanup_dir=$(mktemp -d)
+cleanup_log=$window_cleanup_dir/hyprctl.log
+cleanup_marker=$window_cleanup_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_cleanup_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_cleanup_dir" \
+    XDG_RUNTIME_DIR="$window_cleanup_dir/runtime" \
+    OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$cleanup_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_log" \
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"
+)
+jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null \
+  && jq -e '.active == false and .status == "restored"
+    and .evacuated == 2 and .workspaceRemoved == true' \
+    "$window_cleanup_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "detached lifecycle cleanup does not order verified exit before shortcut release"
+
+window_dirty_inactive_dir=$(mktemp -d)
+dirty_runtime=$window_dirty_inactive_dir/runtime
+mkdir -p "$dirty_runtime/omarchy-kids"
+printf 'version=1\n' > "$dirty_runtime/omarchy-kids/shortcut-policy.active"
+if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_dirty_inactive_dir/state" \
+    XDG_RUNTIME_DIR="$dirty_runtime" \
+    OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
+    OMARCHY_KIDS_CLEANUP_RETRY_SECONDS=0 \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$window_dirty_inactive_dir/hyprctl.log" \
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"; then
+  fail "detached lifecycle cleanup accepts unverified inactive state"
+fi
+[[ -f $dirty_runtime/omarchy-kids/shortcut-policy.active \
+    && ! -e $dirty_runtime/omarchy-kids/shortcut-policy.lock ]] \
+  || fail "detached lifecycle cleanup releases shortcuts after dirty inactive exit"
+
+rg -q 'readonly property bool kidsModeActive:' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'allowlistService\.modePhase === "active"' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -q 'result\.workspaceRemoved === true' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'Number\(result\.kidsRemaining \|\| 0\) === 0' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'windowLaunchGuardPending\(\)' "$PLUGIN_ROOT/Service.qml" \
+  || fail "the menu lifecycle does not gate launches and enforce cleanup verification"
+rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_dir" "$window_stale_dir" "$window_hotplug_dir" \
+  "$window_legacy_dir" "$window_misdirected_dir" \
+  "$window_residual_dir" "$window_multi_dir" "$window_missing_dir" "$window_test_dir"
 
 shortcut_test_dir=$(mktemp -d)
 shortcut_log=$shortcut_test_dir/hyprctl.log
@@ -248,6 +669,8 @@ shortcut_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.json
 shortcut_mock=$PLUGIN_ROOT/test/hyprctl-mock
 keybindings_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.txt
 keybindings_mock=$PLUGIN_ROOT/test/keybindings-mock
+universal_fixture=$PLUGIN_ROOT/test/fixtures/universal-binding.json
+kids_submap_fixture=$PLUGIN_ROOT/test/fixtures/kids-submap-binding.json
 
 shortcut_result=$(
   XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
@@ -261,26 +684,19 @@ shortcut_result=$(
 jq -e '.action == "enter" and .applied == true and .changed > 0' \
   <<< "$shortcut_result" >/dev/null \
   || fail "shortcut policy does not report a successful transient layer"
-rg -Fq 'hl.unbind("SUPER + SPACE")' "$shortcut_log" \
+rg -Fq 'hl.define_submap("omarchy-kids", function()' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Menu' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + RETURN")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + CTRL + C")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + CTRL + code:10")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + CTRL + code:17")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("CTRL + ALT + DELETE")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + CTRL + DELETE")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + SLASH")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("XF86TouchpadToggle")' "$shortcut_log" \
-  || fail "shortcut policy does not redirect menus/browser and block stock bypasses"
-if rg -Fq 'hl.unbind("SUPER + SHIFT + F")' "$shortcut_log"; then
-  fail "shortcut policy replaces a customized binding"
-fi
-if rg -Fq 'hl.unbind("SUPER + CTRL + code:18")' "$shortcut_log"; then
-  fail "shortcut policy replaces a customized physical-key binding"
-fi
+  && rg -Fq 'hl.bind("SUPER + W", hl.dsp.window.close()' "$shortcut_log" \
+  && rg -Fq 'hl.bind("XF86AudioRaiseVolume"' "$shortcut_log" \
+  && rg -Fq 'hl.bind("SUPER + CTRL + L"' "$shortcut_log" \
+  && rg -Fq 'hl.bind("switch:on:Lid Switch"' "$shortcut_log" \
+  && rg -Fq 'hl.dispatch(hl.dsp.submap("omarchy-kids"))' "$shortcut_log" \
+  && rg -Fq 'hl.get_current_submap() == "omarchy-kids"' "$shortcut_log" \
+  && ! rg -Fq 'hl.unbind(' "$shortcut_log" \
+  || fail "shortcut policy does not install and verify a default-deny submap"
 
 : > "$shortcut_log"
 shortcut_result=$(
@@ -296,9 +712,9 @@ jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/nul
   || fail "shortcut policy cannot rebuild itself after a shell reload"
 [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
   || fail "shortcut policy does not restore configuration before rebuilding its layer"
-rg -Fq 'hl.unbind("SUPER + SHIFT + W")' "$shortcut_log" \
-  && rg -Fq 'hl.unbind("SUPER + CTRL + Q")' "$shortcut_log" \
-  && ! rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
+! rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
+  && ! rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \
+  && ! rg -Fq 'Kids Mode: Calculator' "$shortcut_log" \
   || fail "shortcut policy does not follow the current default-app selection"
 
 : > "$shortcut_log"
@@ -314,6 +730,34 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
   && [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
   && [[ ! -e $shortcut_test_dir/runtime/omarchy-kids/shortcut-policy.active ]] \
   || fail "shortcut policy does not restore Hyprland state on exit"
+
+if shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/universal-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$universal_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter true true true
+); then
+  fail "shortcut policy accepts a universal binding that bypasses submaps"
+fi
+jq -e '.action == "enter" and .applied == false
+  and (.error | contains("universal Hyprland binding"))' \
+  <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy does not explain a universal-binding refusal"
+
+if shortcut_result=$(
+  XDG_RUNTIME_DIR="$shortcut_test_dir/collision-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$kids_submap_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter true true true
+); then
+  fail "shortcut policy accepts a pre-existing binding in its target submap"
+fi
+jq -e '.action == "enter" and .applied == false
+  and (.error | contains("submap name is already in use"))' \
+  <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy does not explain a target-submap collision"
 rm -rf -- "$shortcut_test_dir"
 
 rg -q 'sourceAppLibrary\.sortedEntries' "$PLUGIN_ROOT/Menu.qml" \
@@ -392,12 +836,15 @@ rg -q 'serviceFor\("omarchy\.notifications"\)' "$PLUGIN_ROOT/Service.qml" \
 
 rg -q 'ModeState\.stateText\(root\.kidsModeEnabled\)' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'function setKidsModeEnabled' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'function maybeCompleteActivation' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.modePhase = "active"' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'root\.rollbackActivation' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'root\.kidsModeEnabled \? filteredShell : root\.shell' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q '/default/omarchy/omarchy-menu\.jsonc' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'serviceFor\("omarchy\.lock"\)' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'root\.lockService\.beginLock\(\)' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'setKidsModeEnabled\(false\)' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -q '\? "ACTIVE" : "INACTIVE"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -q 'root\.modePhase === "entering".*"STARTING"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q '"EXIT KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q '"START KIDS MODE"' "$PLUGIN_ROOT/Panel.qml" \
   || fail "the persistent Kids Mode toggle is not protected by Omarchy authentication"

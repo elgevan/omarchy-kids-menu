@@ -1,0 +1,69 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+if [[ ${1:-} == -j ]]; then
+  case ${2:-} in
+    clients)
+      [[ ${OMARCHY_KIDS_TEST_FAIL_CLIENTS:-false} != true ]]
+      if [[ -n ${OMARCHY_KIDS_TEST_POST_CLIENTS:-} ]]; then
+        clients_marker=${OMARCHY_KIDS_TEST_CLIENTS_MARKER:-$OMARCHY_KIDS_TEST_WINDOW_LOG.clients}
+        if [[ -f $clients_marker ]]; then
+          cat "$OMARCHY_KIDS_TEST_POST_CLIENTS"
+        else
+          printf 'queried\n' > "$clients_marker"
+          cat "$OMARCHY_KIDS_TEST_CLIENTS"
+        fi
+      else
+        cat "$OMARCHY_KIDS_TEST_CLIENTS"
+      fi
+      ;;
+    activewindow)
+      cat "$OMARCHY_KIDS_TEST_ACTIVE_WINDOW"
+      ;;
+    activeworkspace)
+      cat "$OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE"
+      ;;
+    monitors)
+      [[ ${OMARCHY_KIDS_TEST_FAIL_MONITORS:-false} != true ]]
+      cat "$OMARCHY_KIDS_TEST_MONITORS"
+      ;;
+    workspaces)
+      [[ ${OMARCHY_KIDS_TEST_FAIL_WORKSPACES:-false} != true ]]
+      cat "$OMARCHY_KIDS_TEST_WORKSPACES"
+      ;;
+    *)
+      echo "unexpected JSON query: $*" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ ${1:-} == --quiet && ${2:-} == dispatch ]]; then
+  operation=${3:-}
+  printf '%s\n' "$operation" >> "$OMARCHY_KIDS_TEST_WINDOW_LOG"
+
+  if [[ $operation == *'hl.dsp.window.move'* \
+      && -n ${OMARCHY_KIDS_TEST_FAIL_MOVE_ADDRESS:-} \
+      && $operation == *"address:${OMARCHY_KIDS_TEST_FAIL_MOVE_ADDRESS}"* ]]; then
+    exit 1
+  fi
+  if [[ $operation == *'hl.dsp.window.pin'* \
+      && -n ${OMARCHY_KIDS_TEST_FAIL_PIN_ADDRESS:-} \
+      && $operation == *"address:${OMARCHY_KIDS_TEST_FAIL_PIN_ADDRESS}"* ]]; then
+    exit 1
+  fi
+  if [[ $operation == *'hl.dsp.focus'* \
+      && ${OMARCHY_KIDS_TEST_FAIL_FOCUS:-false} == true ]]; then
+    exit 1
+  fi
+  if [[ $operation == *'hl.dsp.focus'* && $operation == *'window = '* \
+      && ${OMARCHY_KIDS_TEST_FAIL_WINDOW_FOCUS:-false} == true ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+echo "unexpected hyprctl mock call: $*" >&2
+exit 1

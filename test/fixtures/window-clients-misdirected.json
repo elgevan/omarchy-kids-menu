@@ -1,0 +1,52 @@
+[
+  {
+    "address": "0xaaa",
+    "mapped": true,
+    "workspace": {"name": "other"},
+    "class": "first",
+    "title": "First",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xbbb",
+    "mapped": true,
+    "workspace": {"name": "work"},
+    "class": "second",
+    "title": "Second",
+    "pinned": false,
+    "floating": true,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xccc",
+    "mapped": true,
+    "workspace": {"name": "other"},
+    "class": "omawrite",
+    "title": "Kids Mode note",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xddd",
+    "mapped": true,
+    "workspace": {"name": "work"},
+    "class": "chromium",
+    "title": "YouTube",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xeee",
+    "mapped": true,
+    "workspace": {"name": "other"},
+    "class": "unrelated",
+    "title": "Unrelated post-entry window",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  }
+]
