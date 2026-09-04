@@ -29,20 +29,25 @@ rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
+  .name == "Omarchy Kids Mode" and
   .version == "0.14.3" and
+  .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
   .entryPoints.service == "Service.qml" and
+  .barWidget.displayName == "Kids Mode" and
+  .barWidget.description == "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Mode is active." and
   (.omarchy? == null)
 ' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
 
-jq -e . "$MENU" >/dev/null || fail "kids menu is not valid JSONC/JSON"
+jq -e . "$MENU" >/dev/null || fail "Kids Mode menu is not valid JSONC/JSON"
 jq -e 'keys | length == 0' "$EMPTY_MENU" >/dev/null || fail "menu extension guard is not empty"
 
 jq -e '
   (keys | sort) == ["apps", "style", "style.background", "style.theme"] and
   .apps.provider == "apps" and
+  .apps.label == "Apps" and
   .style.parent == "apps" and
   .style.label == "Style" and
   (.style.when | contains("omarchy-theme")) and
@@ -1083,4 +1088,4 @@ for file in "$PLUGIN_ROOT"/*.qml; do
   qmllint -I /usr/share/omarchy/shell "$file"
 done
 
-echo "Omarchy Kids Menu plugin checks passed"
+echo "Omarchy Kids Mode plugin checks passed"

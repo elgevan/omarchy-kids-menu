@@ -103,7 +103,7 @@ Loader {
 
     function remove(desktopId, name) {
       if (root.shell)
-        Quickshell.execDetached(["omarchy-notification-send", "Kids Menu only filters apps. Use its bar icon to change the list."])
+        Quickshell.execDetached(["omarchy-notification-send", "Choose apps from the Kids Mode icon on the bar."])
     }
   }
 

@@ -325,8 +325,8 @@ pass "app selection is read-only while Kids Mode is active"
 omarchy-shell "$MANAGER_ID" hide
 
 [[ $(omarchy-shell shell call "$PLUGIN_ID" ping '{}') == ok ]] \
-  || fail "kids menu answers its standalone IPC"
-pass "kids menu answers its standalone IPC"
+  || fail "Kids Mode menu answers its standalone IPC"
+pass "Kids Mode menu answers its standalone IPC"
 [[ $(omarchy menu ping) == unknown ]] || fail "stock menu IPC is unavailable in Kids Mode"
 pass "stock menu IPC is unavailable in Kids Mode"
 
@@ -481,7 +481,7 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wtype -M ctrl -k 3 -m ctrl
   sleep 1
   wtype -k Return
-  wait_until "app selection becomes editable after authenticated exit" 15 \
+  wait_until "app selection becomes editable after exiting with a password or fingerprint" 15 \
     allowlist_hash_differs "$editable_allowlist_hash"
   printf '%s\n' "$editable_allowlist_snapshot" > "$ALLOWLIST"
   wait_until "acceptance allowlist is restored after editability check" 15 \
@@ -550,4 +550,4 @@ wait_until "restored stock menu closes" 15 layer_absent
 
 trap - EXIT
 cleanup
-pass "Omarchy Kids menu VM acceptance passed"
+pass "Omarchy Kids Mode VM acceptance passed"

@@ -495,7 +495,7 @@ exit_session() {
     fi
   fi
 
-  # Do not reveal the parent's windows while a Kids-launched client is still
+  # Do not reveal the original desktop's windows while a Kids Mode client is still
   # handling (or refusing) its graceful close request.
   if ((failed == 0)); then
     while IFS= read -r row; do

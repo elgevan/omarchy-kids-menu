@@ -175,14 +175,14 @@ Panel {
   function modeActionDetail() {
     if (root.modePhase === "entering") return "Checking windows, shortcuts, shell, and notifications"
     if (root.modePhase === "exiting" || root.modePhase === "rollback")
-      return "Restrictions remain until restoration succeeds"
-    if (root.modePhase === "error") return "Kids Mode restrictions are still in place"
+      return "Kids Mode stays active until your desktop is restored"
+    if (root.modePhase === "error") return "Kids Mode is still active"
     if (root.modePhase === "active") {
       return root.service.hiddenWindowCount > 0
-        ? "Authenticate to restore " + root.service.hiddenWindowCount + " windows"
-        : "Requires password or fingerprint"
+        ? "Use your password or fingerprint to restore " + root.service.hiddenWindowCount + " windows"
+        : "Use your password or fingerprint to return to your desktop"
     }
-    return "Apply the app filter and mute notifications"
+    return "Show only chosen apps and mute notifications"
   }
 
   ListModel { id: appModel }
