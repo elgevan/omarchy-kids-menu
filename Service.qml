@@ -42,6 +42,7 @@ Item {
   property bool windowSessionSynced: false
   property int windowGuardAttemptsRemaining: 0
   property var stockMenuRestore: null
+  property var barLayoutRestore: null
   property bool shellModeApplied: false
   property bool shellPolicySynced: false
   property int shellSetupAttempts: 0
@@ -685,6 +686,9 @@ Item {
           root.modeEffectsDesired
         )
         if (result && result.restore) root.stockMenuRestore = result.restore
+        root.barLayoutRestore = result && result.barRestore
+          ? result.barRestore
+          : null
       })
       root.shellModeApplied = root.modeEffectsDesired
       root.shellPolicySynced = true
@@ -700,8 +704,15 @@ Item {
   function releaseShellIntegration() {
     if (!root.shell || typeof root.shell.mutateShellConfig !== "function") return
     root.shell.mutateShellConfig(function(config) {
-      ShellIntegration.deactivate(config, root.managerWidgetId, root.stockMenuRestore)
+      ShellIntegration.deactivate(
+        config,
+        root.pluginId,
+        root.managerWidgetId,
+        root.stockMenuRestore,
+        root.barLayoutRestore
+      )
     })
+    root.barLayoutRestore = null
     root.shellModeApplied = false
     root.shellPolicySynced = true
   }

@@ -1,5 +1,13 @@
 var STOCK_MENU_ID = "omarchy.menu"
 var RESTORE_KEY = "kidsMenuRestore"
+var BAR_RESTORE_KEY = "kidsBarLayoutRestore"
+var KIDS_CONTROL_IDS = [
+  "omarchy.bluetooth",
+  "omarchy.network",
+  "omarchy.audio",
+  "omarchy.monitor",
+  "omarchy.power"
+]
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -60,6 +68,64 @@ function normalizedRestore(value) {
   }
 }
 
+function normalizedBarRestore(value) {
+  if (!isObject(value)) return null
+  var sections = ["left", "center", "right"]
+  var restore = ({})
+  for (var i = 0; i < sections.length; i++) {
+    var section = sections[i]
+    if (!Array.isArray(value[section])) return null
+    restore[section] = cloneJson(value[section])
+  }
+  return restore
+}
+
+function barLayoutSnapshot(config) {
+  ensureConfigShape(config)
+  return {
+    left: cloneJson(config.bar.layout.left),
+    center: cloneJson(config.bar.layout.center),
+    right: cloneJson(config.bar.layout.right)
+  }
+}
+
+function entryFromLayout(layout, id) {
+  var sections = ["left", "center", "right"]
+  for (var s = 0; s < sections.length; s++) {
+    var entries = layout[sections[s]]
+    for (var i = 0; i < entries.length; i++) {
+      if (entryId(entries[i]) === id)
+        return isObject(entries[i]) ? cloneJson(entries[i]) : { id: id }
+    }
+  }
+  return { id: id }
+}
+
+function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore) {
+  var pluginLocation = barLocation(config, pluginId)
+  var pluginEntry = pluginLocation && isObject(pluginLocation.entry)
+    ? cloneJson(pluginLocation.entry)
+    : { id: pluginId }
+  pluginEntry.id = pluginId
+  pluginEntry[BAR_RESTORE_KEY] = cloneJson(restore)
+
+  config.bar.layout.left = [pluginEntry]
+  config.bar.layout.center = []
+  config.bar.layout.right = [managerEntry(managerId, managerPath)]
+  for (var i = 0; i < KIDS_CONTROL_IDS.length; i++)
+    config.bar.layout.right.push(entryFromLayout(restore, KIDS_CONTROL_IDS[i]))
+}
+
+function restoreBarLayout(config, restore, pluginId) {
+  config.bar.layout.left = cloneJson(restore.left)
+  config.bar.layout.center = cloneJson(restore.center)
+  config.bar.layout.right = cloneJson(restore.right)
+
+  var pluginLocation = barLocation(config, pluginId)
+  if (pluginLocation && isObject(pluginLocation.entry))
+    delete pluginLocation.entry[BAR_RESTORE_KEY]
+}
+
 function setStockMenuDisabled(config, disabled) {
   var current = Array.isArray(config.disabledPlugins) ? config.disabledPlugins : []
   var next = current.filter(function(id) { return String(id) !== STOCK_MENU_ID })
@@ -90,9 +156,10 @@ function ensureManager(config, managerId, managerPath) {
   right.splice(insertAt, 0, managerEntry(managerId, managerPath))
 }
 
-// Replace only the stock menu's bar slot. This plugin retains its own ID and
-// does not claim Omarchy's IPC route. The restore record travels with the
-// plugin's bar entry so shell reloads do not lose the user's original slot.
+// Replace the stock menu's bar slot while the plugin is enabled. In Kids Mode,
+// also replace the rest of the bar with the small controls allowlist. Both
+// restore records travel with the plugin entry so a shell reload cannot lose
+// the user's exact normal layout or the stock menu's original slot.
 function activate(config, pluginId, managerId, managerPath, kidsModeEnabled) {
   ensureConfigShape(config)
   var pluginLocation = barLocation(config, pluginId)
@@ -104,6 +171,7 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled) {
   pluginEntry.id = pluginId
 
   var restore = normalizedRestore(pluginEntry[RESTORE_KEY])
+  var barRestore = normalizedBarRestore(pluginEntry[BAR_RESTORE_KEY])
   var stockLocation = barLocation(config, STOCK_MENU_ID)
   if (!restore && stockLocation) {
     var restoreIndex = stockLocation.index
@@ -135,12 +203,30 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled) {
   }
 
   ensureManager(config, managerId, managerPath)
+  if (kidsModeEnabled === true) {
+    if (!barRestore) barRestore = barLayoutSnapshot(config)
+    applyKidsBarLayout(config, pluginId, managerId, managerPath, barRestore)
+  } else if (barRestore) {
+    restoreBarLayout(config, barRestore, pluginId)
+    ensureManager(config, managerId, managerPath)
+  }
   setStockMenuDisabled(config, kidsModeEnabled === true)
-  return { restore: restore }
+  return {
+    restore: restore,
+    barRestore: kidsModeEnabled === true ? barRestore : null
+  }
 }
 
-function deactivate(config, managerId, restoreValue) {
+function deactivate(config, pluginId, managerId, restoreValue, barRestoreValue) {
   ensureConfigShape(config)
+  var pluginLocation = barLocation(config, pluginId)
+  var embeddedBarRestore = pluginLocation && isObject(pluginLocation.entry)
+    ? normalizedBarRestore(pluginLocation.entry[BAR_RESTORE_KEY])
+    : null
+  var barRestore = embeddedBarRestore || normalizedBarRestore(barRestoreValue)
+  if (barRestore) restoreBarLayout(config, barRestore, pluginId)
+
+  removeBarEntries(config, pluginId)
   removeBarEntries(config, managerId)
   setStockMenuDisabled(config, false)
 
@@ -156,10 +242,14 @@ if (typeof module !== "undefined") {
   module.exports = {
     STOCK_MENU_ID: STOCK_MENU_ID,
     RESTORE_KEY: RESTORE_KEY,
+    BAR_RESTORE_KEY: BAR_RESTORE_KEY,
+    KIDS_CONTROL_IDS: KIDS_CONTROL_IDS,
     entryId: entryId,
     ensureConfigShape: ensureConfigShape,
     barLocation: barLocation,
     normalizedRestore: normalizedRestore,
+    normalizedBarRestore: normalizedBarRestore,
+    barLayoutSnapshot: barLayoutSnapshot,
     setStockMenuDisabled: setStockMenuDisabled,
     activate: activate,
     deactivate: deactivate

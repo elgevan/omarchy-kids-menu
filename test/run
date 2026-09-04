@@ -30,7 +30,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
   .name == "Omarchy Kids Mode" and
-  .version == "0.14.4" and
+  .version == "0.15.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -146,36 +146,98 @@ const config = {
         {id: "omarchy.workspaces"},
         {id: pluginId}
       ],
-      center: [],
-      right: [{id: "omarchy.tray"}, {id: "omarchy.audio"}]
+      center: [{id: "omarchy.clock", format: "HH:mm"}],
+      right: [{id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}]
     }
   },
   plugins: []
 }
 
 let result = integration.activate(config, pluginId, managerId, managerPath, true)
-assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId])
+assert.deepEqual(config.bar.layout.center, [])
+assert.deepEqual(
+  config.bar.layout.right.map(integration.entryId),
+  [managerId, ...integration.KIDS_CONTROL_IDS]
+)
 assert.equal(config.bar.layout.left[0].kidsMenuRestore.entry.custom, "preserved")
-assert.equal(config.bar.layout.right[1].id, managerId)
-assert.equal(config.bar.layout.right[1].source, managerPath)
+assert.deepEqual(config.bar.layout.right[3], {id: "omarchy.audio", step: 3})
+assert.equal(config.bar.layout.right[0].source, managerPath)
+assert.deepEqual(
+  config.bar.layout.left[0].kidsBarLayoutRestore.center,
+  [{id: "omarchy.clock", format: "HH:mm"}]
+)
 assert.deepEqual(config.disabledPlugins, ["omarchy.menu"])
 assert.deepEqual(result.restore, {
   section: "left",
   index: 0,
   entry: {id: "omarchy.menu", custom: "preserved"}
 })
+assert.deepEqual(result.barRestore.right.map(integration.entryId), [
+  "omarchy.tray", managerId, "omarchy.audio"
+])
+
+const firstBarRestore = JSON.parse(JSON.stringify(result.barRestore))
+result = integration.activate(config, pluginId, managerId, managerPath, true)
+assert.deepEqual(result.barRestore, firstBarRestore)
+assert.deepEqual(
+  config.bar.layout.right.map(integration.entryId),
+  [managerId, ...integration.KIDS_CONTROL_IDS]
+)
 
 result = integration.activate(config, pluginId, managerId, managerPath, false)
-assert.equal(config.bar.layout.left.filter(entry => integration.entryId(entry) === pluginId).length, 1)
-assert.equal(config.bar.layout.right.filter(entry => integration.entryId(entry) === managerId).length, 1)
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+assert.deepEqual(config.bar.layout.center, [{id: "omarchy.clock", format: "HH:mm"}])
+assert.deepEqual(config.bar.layout.right.map(integration.entryId), [
+  "omarchy.tray", managerId, "omarchy.audio"
+])
+assert.equal(config.bar.layout.right[2].step, 3)
+assert.equal(config.bar.layout.left[0].kidsBarLayoutRestore, undefined)
 assert.equal(config.disabledPlugins, undefined)
+assert.equal(result.barRestore, null)
 
 config.bar.layout.left = config.bar.layout.left.filter(entry => integration.entryId(entry) !== pluginId)
-integration.deactivate(config, managerId, result.restore)
+integration.deactivate(config, pluginId, managerId, result.restore, result.barRestore)
 assert.deepEqual(config.bar.layout.left.map(integration.entryId), ["omarchy.menu", "omarchy.workspaces"])
 assert.equal(config.bar.layout.left[0].custom, "preserved")
+assert.deepEqual(config.bar.layout.center, [{id: "omarchy.clock", format: "HH:mm"}])
+assert.deepEqual(config.bar.layout.right, [{id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}])
 assert.equal(integration.barLocation(config, managerId), null)
 assert.equal(config.disabledPlugins, undefined)
+
+const removalConfig = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [
+        {id: "omarchy.menu", custom: "preserved"},
+        {id: "omarchy.workspaces"},
+        {id: pluginId}
+      ],
+      center: [{id: "omarchy.clock"}],
+      right: [{id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}]
+    }
+  },
+  plugins: []
+}
+result = integration.activate(removalConfig, pluginId, managerId, managerPath, true)
+integration.deactivate(
+  removalConfig,
+  pluginId,
+  managerId,
+  result.restore,
+  result.barRestore
+)
+assert.deepEqual(removalConfig.bar.layout.left.map(integration.entryId), [
+  "omarchy.menu", "omarchy.workspaces"
+])
+assert.deepEqual(removalConfig.bar.layout.center, [{id: "omarchy.clock"}])
+assert.deepEqual(removalConfig.bar.layout.right, [
+  {id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}
+])
+assert.equal(integration.barLocation(removalConfig, pluginId), null)
+assert.equal(integration.barLocation(removalConfig, managerId), null)
+assert.equal(removalConfig.disabledPlugins, undefined)
 
 const customConfig = {
   version: 1,
@@ -189,7 +251,11 @@ const customConfig = {
   plugins: []
 }
 result = integration.activate(customConfig, pluginId, managerId, managerPath, true)
-assert.deepEqual(customConfig.bar.layout.left.map(integration.entryId), ["omarchy.workspaces", pluginId])
+assert.deepEqual(customConfig.bar.layout.left.map(integration.entryId), [pluginId])
+assert.deepEqual(
+  customConfig.bar.layout.right.map(integration.entryId),
+  [managerId, ...integration.KIDS_CONTROL_IDS]
+)
 assert.equal(result.restore.index, 1)
 
 const noStockConfig = {
@@ -199,9 +265,18 @@ const noStockConfig = {
 }
 result = integration.activate(noStockConfig, pluginId, managerId, managerPath, true)
 assert.equal(result.restore, null)
-noStockConfig.bar.layout.left = []
-integration.deactivate(noStockConfig, managerId, result.restore)
+integration.deactivate(
+  noStockConfig,
+  pluginId,
+  managerId,
+  result.restore,
+  result.barRestore
+)
 assert.equal(integration.barLocation(noStockConfig, "omarchy.menu"), null)
+assert.deepEqual(noStockConfig.bar.layout, {left: [], center: [], right: []})
+
+assert.equal(integration.normalizedBarRestore({left: [], center: []}), null)
+assert.equal(integration.normalizedBarRestore({left: [], center: [], right: "bad"}), null)
 NODE
 
 node - "$PLUGIN_ROOT/KidsBrowser.js" <<'NODE'

@@ -20,6 +20,8 @@ kids_launched_address=""
 removal_kids_address=""
 original_workspace=""
 original_monitor=""
+original_bar_layout=""
+inactive_bar_layout=""
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -140,6 +142,28 @@ manager_absent() {
   ' "$HOME/.config/omarchy/shell.json"
 }
 
+kids_bar_is_limited() {
+  jq -e --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
+    def entry_id: if type == "object" then (.id // "") else . end;
+    ([.bar.layout.left[]? | entry_id] == [$plugin]) and
+    ([.bar.layout.center[]? | entry_id] == []) and
+    ([.bar.layout.right[]? | entry_id] == [
+      $manager,
+      "omarchy.bluetooth",
+      "omarchy.network",
+      "omarchy.audio",
+      "omarchy.monitor",
+      "omarchy.power"
+    ])
+  ' "$HOME/.config/omarchy/shell.json"
+}
+
+bar_layout_matches() {
+  local expected=$1
+  jq -e --argjson expected "$expected" '.bar.layout == $expected' \
+    "$HOME/.config/omarchy/shell.json"
+}
+
 dnd_is() {
   [[ $(omarchy-shell notifications isDnd 2>/dev/null) == "$1" ]]
 }
@@ -255,6 +279,7 @@ jq -n '{version: 1, allowedDesktopIds: ["google-chrome", "chromium", "omawrite",
   > "$ALLOWLIST"
 dnd_before=$(omarchy-shell notifications isDnd)
 [[ $dnd_before == on || $dnd_before == off ]] || fail "read initial notification state"
+original_bar_layout=$(jq -c '.bar.layout' "$HOME/.config/omarchy/shell.json")
 
 omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
 omarchy restart shell
@@ -267,6 +292,7 @@ wait_until "inactive mode leaves the stock menu available" 20 stock_menu_availab
 wait_until "inactive mode leaves the stock menu shortcut intact" 20 \
   binding_description_present "Omarchy menu"
 wait_until "cleanup helpers are staged outside the plugin checkout" 20 runtime_tools_ready
+inactive_bar_layout=$(jq -c '.bar.layout' "$HOME/.config/omarchy/shell.json")
 original_workspace=$(hyprctl -j activeworkspace | jq -r '.name // "1"')
 original_monitor=$(hyprctl -j activeworkspace | jq -r '.monitor // ""')
 
@@ -277,6 +303,7 @@ wait_until "Kids Mode activates explicitly" 20 mode_is on
 omarchy-shell "$MANAGER_ID" hide
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
+wait_until "Kids Mode limits the bar to child-safe controls" 20 kids_bar_is_limited
 wait_until "Kids Mode redirects the normal menu shortcut" 20 \
   binding_description_present "Kids Mode: Menu"
 wait_until "Kids Mode redirects the Apps shortcut" 20 \
@@ -443,6 +470,8 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   fi
   wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
   wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
+  wait_until "internal Off restores the exact prior bar layout" 20 \
+    bar_layout_matches "$inactive_bar_layout"
   wait_until "internal Off restores the stock menu shortcut" 20 \
     binding_description_present "Omarchy menu"
   wait_until "internal Off restores the terminal shortcut" 20 \
@@ -490,6 +519,7 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "turning Kids Mode on is immediate" 15 mode_is on
   wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
   wait_until "turning Kids Mode on blocks stock menu IPC again" 15 stock_menu_blocked
+  wait_until "turning Kids Mode on limits the bar again" 15 kids_bar_is_limited
   wait_until "turning Kids Mode on reapplies shortcut filtering" 15 \
     binding_description_present "Kids Mode: Menu"
   lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
@@ -520,6 +550,8 @@ omarchy plugin remove "$PLUGIN_ID" --yes
 wait_until "direct removal deletes the plugin checkout" 20 plugin_absent
 wait_until "direct removal restores the stock menu" 20 stock_menu_restored
 wait_until "direct removal removes the right manager widget" 20 manager_absent
+wait_until "direct removal restores the pre-plugin bar layout" 20 \
+  bar_layout_matches "$original_bar_layout"
 wait_until "direct removal restores the prior DND state" 20 dnd_is "$dnd_before"
 wait_until "direct removal restores stock shortcuts" 20 \
   binding_description_present "Omarchy menu"

@@ -39,10 +39,11 @@ Starting Kids Mode temporarily:
 
 - Moves your open windows to a private workspace and opens a Kids Mode workspace.
 - Limits the Omarchy menu and selected shortcuts to the apps you chose and safe system actions.
+- Limits the bar to the Kids Mode controls plus Bluetooth, Wi-Fi, volume, display, and power; your exact normal layout is restored on exit.
 - Turns on Do Not Disturb while remembering its previous setting.
 - Launches supported browsers and web apps with the separate Kids Mode browser profile.
 
-Exiting Kids Mode restores the original windows, workspaces, shortcuts, menu, and notification setting. Disabling or removing the plugin also restores the normal shell integration. The shortcut policy is applied at runtime and does not overwrite Hyprland configuration files.
+Exiting Kids Mode restores the original windows, workspaces, shortcuts, menu, bar layout, and notification setting. Disabling or removing the plugin also restores the normal shell integration. The shortcut policy is applied at runtime and does not overwrite Hyprland configuration files.
 
 The plugin stores the chosen app list and mode state under `~/.config/omarchy-kids/`, runtime state under `${XDG_STATE_HOME:-~/.local/state}/omarchy-kids/`, and the separate browser profile under `~/.local/share/omarchy-kids/chromium/`.
 
