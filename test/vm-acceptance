@@ -161,6 +161,27 @@ kids_bar_is_limited() {
   ' "$HOME/.config/omarchy/shell.json"
 }
 
+kids_plugins_are_limited() {
+  omarchy plugin list --json | jq -e --arg plugin "$PLUGIN_ID" '
+    def has_visible_surface:
+      (.kinds // [])
+      | any(. == "bar-widget" or . == "menu" or . == "overlay" or . == "panel");
+    [.[]
+      | select(.enabled == true)
+      | select(has_visible_surface)
+      | .id] as $enabled
+    | all($enabled[];
+        . == $plugin
+        or . == "omarchy.workspaces"
+        or endswith(".workspaces")
+        or . == "omarchy.bluetooth"
+        or . == "omarchy.network"
+        or . == "omarchy.audio"
+        or . == "omarchy.monitor"
+        or . == "omarchy.power")
+  '
+}
+
 visible_kids_bar_is_limited() {
   local workspace_id
   workspace_id=$(jq -r '
@@ -185,6 +206,13 @@ bar_layout_matches() {
   local expected=$1
   jq -e --argjson expected "$expected" '.bar.layout == $expected' \
     "$HOME/.config/omarchy/shell.json"
+}
+
+plugin_state_matches() {
+  local expected=$1
+  jq -e --argjson expected "$expected" '
+    {plugins: (.plugins // []), disabledPlugins: (.disabledPlugins // null)} == $expected
+  ' "$HOME/.config/omarchy/shell.json"
 }
 
 dnd_is() {
@@ -245,7 +273,7 @@ youtube_window_with_kids_profile() {
     [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* ]] && return 0
   done < <(hyprctl -j clients | jq -r '
     .[]
-    | select(.workspace.name == "omarchy-kids")
+    | select(.workspace.name == "1")
     | select((.class|ascii_downcase|contains("youtube")) or (.title|ascii_downcase|contains("youtube")))
     | .pid
   ')
@@ -255,7 +283,7 @@ youtube_window_with_kids_profile() {
 kids_youtube_address() {
   hyprctl -j clients | jq -er '
     .[]
-    | select(.workspace.name == "omarchy-kids")
+    | select(.workspace.name == "1")
     | select((.class|ascii_downcase|contains("youtube")) or (.title|ascii_downcase|contains("youtube")))
     | .address
   ' | head -1
@@ -273,12 +301,6 @@ active_context_is() {
   hyprctl -j activeworkspace | jq -e \
     --arg workspace "$workspace" --arg monitor "$monitor" \
     '.name == $workspace and (.monitor == $monitor or $monitor == "")'
-}
-
-kids_workspace_absent() {
-  hyprctl -j workspaces | jq -e '
-    all(.[]; .name != "omarchy-kids")
-  '
 }
 
 cleanup() {
@@ -303,6 +325,9 @@ jq -n '{version: 1, allowedDesktopIds: ["google-chrome", "chromium", "omawrite",
 dnd_before=$(omarchy-shell notifications isDnd)
 [[ $dnd_before == on || $dnd_before == off ]] || fail "read initial notification state"
 original_bar_layout=$(jq -c '.bar.layout' "$HOME/.config/omarchy/shell.json")
+original_plugin_state=$(jq -c \
+  '{plugins: (.plugins // []), disabledPlugins: (.disabledPlugins // null)}' \
+  "$HOME/.config/omarchy/shell.json")
 
 omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
 omarchy restart shell
@@ -316,6 +341,9 @@ wait_until "inactive mode leaves the stock menu shortcut intact" 20 \
   binding_description_present "Omarchy menu"
 wait_until "cleanup helpers are staged outside the plugin checkout" 20 runtime_tools_ready
 inactive_bar_layout=$(jq -c '.bar.layout' "$HOME/.config/omarchy/shell.json")
+inactive_plugin_state=$(jq -c \
+  '{plugins: (.plugins // []), disabledPlugins: (.disabledPlugins // null)}' \
+  "$HOME/.config/omarchy/shell.json")
 original_workspace=$(hyprctl -j activeworkspace | jq -r '.name // "1"')
 original_monitor=$(hyprctl -j activeworkspace | jq -r '.monitor // ""')
 
@@ -323,11 +351,13 @@ omarchy-shell "$MANAGER_ID" show
 wait_until "Kids Mode manager opens for first-run activation" 15 screen_contains "KIDS MODE"
 wtype -M ctrl -M shift -k k -m shift -m ctrl
 wait_until "Kids Mode activates explicitly" 20 mode_is on
+wait_until "Kids Mode starts on numbered workspace 1" 20 active_context_is "1" ""
 omarchy-shell "$MANAGER_ID" hide
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
 wait_until "Kids Mode limits the bar to child-safe controls" 20 kids_bar_is_limited
 wait_until "the live bar renders only child-safe controls" 20 visible_kids_bar_is_limited
+wait_until "Kids Mode disables every other visible plugin" 20 kids_plugins_are_limited
 wait_until "Kids Mode redirects the normal menu shortcut" 20 \
   binding_description_present "Kids Mode: Menu"
 wait_until "Kids Mode redirects the Apps shortcut" 20 \
@@ -492,7 +522,6 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "valid authentication turns Kids Mode off" 20 mode_is off
   wait_until "internal Off restores the original workspace and monitor" 20 \
     active_context_is "$original_workspace" "$original_monitor"
-  wait_until "internal Off removes the named Kids workspace" 20 kids_workspace_absent
   if [[ -n $kids_launched_address ]]; then
     wait_until "internal Off closes the Kids-launched app" 20 \
       client_absent "$kids_launched_address"
@@ -501,6 +530,8 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
   wait_until "internal Off restores the exact prior bar layout" 20 \
     bar_layout_matches "$inactive_bar_layout"
+  wait_until "internal Off restores the exact prior plugin state" 20 \
+    plugin_state_matches "$inactive_plugin_state"
   wait_until "internal Off restores the stock menu shortcut" 20 \
     binding_description_present "Omarchy menu"
   wait_until "internal Off restores the terminal shortcut" 20 \
@@ -549,6 +580,8 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "turning Kids Mode on remutes notifications" 15 dnd_is on
   wait_until "turning Kids Mode on blocks stock menu IPC again" 15 stock_menu_blocked
   wait_until "turning Kids Mode on limits the bar again" 15 kids_bar_is_limited
+  wait_until "turning Kids Mode on disables other visible plugins again" 15 \
+    kids_plugins_are_limited
   wait_until "turning Kids Mode on reapplies shortcut filtering" 15 \
     binding_description_present "Kids Mode: Menu"
   lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
@@ -581,6 +614,8 @@ wait_until "direct removal restores the stock menu" 20 stock_menu_restored
 wait_until "direct removal removes the right manager widget" 20 manager_absent
 wait_until "direct removal restores the pre-plugin bar layout" 20 \
   bar_layout_matches "$original_bar_layout"
+wait_until "direct removal restores the pre-plugin plugin state" 20 \
+  plugin_state_matches "$original_plugin_state"
 wait_until "direct removal restores the prior DND state" 20 dnd_is "$dnd_before"
 wait_until "direct removal restores stock shortcuts" 20 \
   binding_description_present "Omarchy menu"
@@ -592,7 +627,6 @@ wait_until "direct removal restores desktop-state shortcuts" 20 \
     "Monitor scaling up" "Toggle touchpad"
 wait_until "direct removal removes Kids shortcut bindings" 20 \
   binding_description_absent "Kids Mode: Menu"
-wait_until "direct removal removes the named Kids workspace" 20 kids_workspace_absent
 if [[ -n $removal_kids_address ]]; then
   wait_until "direct removal closes the Kids-launched app" 20 \
     client_absent "$removal_kids_address"

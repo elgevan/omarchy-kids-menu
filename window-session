@@ -8,8 +8,7 @@ STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids
 STATE_FILE=$STATE_DIR/windows.json
 LOCK_FILE=$STATE_DIR/windows.lock
 PARENT_WORKSPACE=special:omarchy-kids-parent
-KIDS_WORKSPACE=name:omarchy-kids
-KIDS_WORKSPACE_NAME=omarchy-kids
+KIDS_WORKSPACE=1
 
 mkdir -p -- "$STATE_DIR"
 exec 9>"$LOCK_FILE"
@@ -126,6 +125,27 @@ saved_window_in_file() {
   ' "$clients_file" >/dev/null
 }
 
+post_entry_window_count() {
+  local clients_file=$1
+  jq \
+    --arg parentWorkspace "$PARENT_WORKSPACE" \
+    --slurpfile state "$STATE_FILE" \
+    'def saved_matches($saved; $client):
+      $client.address == $saved.address
+      and (($saved.pid // 0) == 0
+        or ($client.pid // 0) == ($saved.pid // 0))
+      and (($saved.initialClass // "") == ""
+        or ($client.initialClass // $client.class // "") == $saved.initialClass)
+      and (($saved.initialTitle // "") == ""
+        or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+    [.[] as $client
+      | $client
+      | select((.mapped // true) == true)
+      | select((.workspace.name // "") != $parentWorkspace)
+      | select(any($state[0].windows[]; saved_matches(.; $client)) | not)]
+    | length' "$clients_file"
+}
+
 session_for_instance() {
   local instance=$1
   [[ -f $STATE_FILE ]] \
@@ -178,13 +198,12 @@ enter_session() {
     return 1
   fi
 
-  local clients_file active_window_file active_workspace_file workspaces_file state_tmp
+  local clients_file active_window_file active_workspace_file state_tmp
   clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
   active_window_file=$(mktemp "$STATE_DIR/active-window.XXXXXX")
   active_workspace_file=$(mktemp "$STATE_DIR/active-workspace.XXXXXX")
-  workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
   state_tmp=$(mktemp "$STATE_DIR/windows.XXXXXX")
-  trap 'rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$workspaces_file" "$state_tmp"' RETURN
+  trap 'rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$state_tmp"' RETURN
 
   if ! "$HYPRCTL_BIN" -j clients > "$clients_file" \
       || ! jq -e 'type == "array"' "$clients_file" >/dev/null; then
@@ -201,21 +220,6 @@ enter_session() {
     emit enter unavailable 0 0 0 0 0 0 1
     return 1
   fi
-  if ! "$HYPRCTL_BIN" -j workspaces > "$workspaces_file" \
-      || ! jq -e 'type == "array"' "$workspaces_file" >/dev/null; then
-    emit enter unavailable 0 0 0 0 0 0 1
-    return 1
-  fi
-
-  # The named workspace is plugin-owned for the lifetime of a session. Refuse
-  # an existing workspace instead of later claiming its windows or making
-  # successful restoration impossible.
-  if jq -e --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-      'any(.[]; (.name // "") == $kidsWorkspace)' "$workspaces_file" >/dev/null; then
-    emit enter workspace-in-use 0 0 0 0 0 0 1
-    return 1
-  fi
-
   if ! jq -n \
       --arg instance "$instance" \
       --arg parentWorkspace "$PARENT_WORKSPACE" \
@@ -259,7 +263,7 @@ enter_session() {
   fi
 
   mv -- "$state_tmp" "$STATE_FILE"
-  rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file" "$workspaces_file"
+  rm -f -- "$clients_file" "$active_window_file" "$active_workspace_file"
   trap - RETURN
   hidden=$(jq -r '.windows | length' "$STATE_FILE")
 
@@ -324,45 +328,19 @@ exit_session() {
   fi
 
   if [[ $(jq -r '.instance' "$STATE_FILE") != "$instance" ]]; then
-    local stale_tmp stale_clients_file stale_workspaces_file stale_kids_remaining=0
+    local stale_tmp
     stale_tmp=$(mktemp "$STATE_DIR/windows.XXXXXX")
-    stale_clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
-    stale_workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
-    if ! "$HYPRCTL_BIN" -j clients > "$stale_clients_file" \
-        || ! jq -e 'type == "array"' "$stale_clients_file" >/dev/null \
-        || ! "$HYPRCTL_BIN" -j workspaces > "$stale_workspaces_file" \
-        || ! jq -e 'type == "array"' "$stale_workspaces_file" >/dev/null; then
-      rm -f -- "$stale_tmp" "$stale_clients_file" "$stale_workspaces_file"
-      emit exit unavailable "$expected" 0 0 "$expected" 0 "$expected" 1
-      return 1
-    fi
-    stale_kids_remaining=$(jq --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-      '[.[]
-        | select((.mapped // true) == true)
-        | select((.workspace.name // "") == $kidsWorkspace)]
-      | length' "$stale_clients_file")
-    if ((stale_kids_remaining > 0)) \
-        || jq -e --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-          'any(.[]; .name == $kidsWorkspace)' "$stale_workspaces_file" >/dev/null; then
-      rm -f -- "$stale_tmp" "$stale_clients_file" "$stale_workspaces_file"
-      record_state_status restore-failed "$expected" 0 "$expected" 1 0 \
-        0 "$stale_kids_remaining" false
-      emit exit restore-failed 0 0 0 "$expected" 0 "$expected" 1 \
-        0 "$stale_kids_remaining" false
-      return 1
-    fi
     jq --arg endedAt "$(date --iso-8601=seconds)" \
       '.active = false | .status = "stale-session"
         | .kidsRemaining = 0 | .workspaceRemoved = true | .endedAt = $endedAt' \
       "$STATE_FILE" > "$stale_tmp"
     mv -- "$stale_tmp" "$STATE_FILE"
-    rm -f -- "$stale_clients_file" "$stale_workspaces_file"
     emit exit stale-session 0 0 0 "$expected" 0 "$expected" 0 0 0 true
     return
   fi
 
   local clients_file moved_file close_targets_file state_tmp monitors_file
-  local active_workspace_file post_clients_file workspaces_file
+  local active_workspace_file post_clients_file
   clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
   moved_file=$(mktemp "$STATE_DIR/moved.XXXXXX")
   close_targets_file=$(mktemp "$STATE_DIR/close-targets.XXXXXX")
@@ -370,8 +348,7 @@ exit_session() {
   monitors_file=$(mktemp "$STATE_DIR/monitors.XXXXXX")
   active_workspace_file=$(mktemp "$STATE_DIR/active-workspace.XXXXXX")
   post_clients_file=$(mktemp "$STATE_DIR/post-clients.XXXXXX")
-  workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
-  trap 'rm -f -- "$clients_file" "$moved_file" "$close_targets_file" "$state_tmp" "$monitors_file" "$active_workspace_file" "$post_clients_file" "$workspaces_file"' RETURN
+  trap 'rm -f -- "$clients_file" "$moved_file" "$close_targets_file" "$state_tmp" "$monitors_file" "$active_workspace_file" "$post_clients_file"' RETURN
 
   if ! "$HYPRCTL_BIN" -j clients > "$clients_file" \
       || ! jq -e 'type == "array"' "$clients_file" >/dev/null; then
@@ -564,22 +541,14 @@ exit_session() {
         || ! jq -e 'type == "array"' "$post_clients_file" >/dev/null; then
       failed=$((failed + 1))
     else
-      kids_remaining=$(jq --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-        '[.[]
-          | select((.mapped // true) == true)
-          | select((.workspace.name // "") == $kidsWorkspace)]
-        | length' "$post_clients_file")
+      kids_remaining=$(post_entry_window_count "$post_clients_file")
       if ((kids_remaining > 0)); then
         failed=$((failed + 1))
       fi
     fi
   else
     if jq -e 'type == "array"' "$post_clients_file" >/dev/null 2>&1; then
-      kids_remaining=$(jq --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-        '[.[]
-          | select((.mapped // true) == true)
-          | select((.workspace.name // "") == $kidsWorkspace)]
-        | length' "$post_clients_file")
+      kids_remaining=$(post_entry_window_count "$post_clients_file")
     else
       kids_remaining=$close_remaining
     fi
@@ -608,24 +577,6 @@ exit_session() {
         failed=$((failed + 1))
       fi
     done < "$close_targets_file"
-  fi
-
-  if ((failed == 0)); then
-    local workspace_check_complete=false
-    local workspace_check_attempt
-    for workspace_check_attempt in 1 2 3 4 5; do
-      if "$HYPRCTL_BIN" -j workspaces > "$workspaces_file" \
-          && jq -e 'type == "array"' "$workspaces_file" >/dev/null \
-          && ! jq -e --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
-            'any(.[]; .name == $kidsWorkspace)' "$workspaces_file" >/dev/null; then
-        workspace_check_complete=true
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ $workspace_check_complete != true ]]; then
-      failed=$((failed + 1))
-    fi
   fi
 
   if ((failed > 0 || restored != live || evacuated != evacuation_expected)); then
@@ -664,7 +615,7 @@ exit_session() {
     "$STATE_FILE" > "$state_tmp"
   mv -- "$state_tmp" "$STATE_FILE"
   rm -f -- "$clients_file" "$moved_file" "$close_targets_file" "$monitors_file" \
-    "$active_workspace_file" "$post_clients_file" "$workspaces_file"
+    "$active_workspace_file" "$post_clients_file"
   trap - RETURN
   emit exit restored 0 "$restored" 0 "$expected" "$live" "$missing" 0 \
     "$evacuated" 0 true

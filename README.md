@@ -2,7 +2,7 @@
 
 Omarchy Kid Menu makes it easier to share the Omarchy desktop you already use with a child. It does not create another Linux user or a separate desktop profile. Browser apps open in a separate Chromium profile, so the child does not see your regular browser history, bookmarks, or signed-in sites such as YouTube.
 
-When you start **Kids Mode**, your apps stay open but move out of view. The child sees only the apps you choose. Kids Mode also simplifies the bar, pauses shortcuts that open other apps or settings, and turns on Do Not Disturb.
+When you start **Kids Mode**, your apps stay open but move out of view. The child starts on workspace 1 and sees only the apps you choose. Kids Mode also hides other visible shell plugins, simplifies the bar, pauses shortcuts that open other apps or settings, and turns on Do Not Disturb.
 
 When you leave Kids Mode, Omarchy asks for your password or fingerprint and restores your desktop as it was.
 

@@ -2,7 +2,7 @@
   {
     "address": "0xaaa",
     "mapped": true,
-    "workspace": {"name": "omarchy-kids"},
+    "workspace": {"name": "1"},
     "class": "first",
     "title": "First",
     "pinned": false,
@@ -22,7 +22,7 @@
   {
     "address": "0xccc",
     "mapped": true,
-    "workspace": {"name": "omarchy-kids"},
+    "workspace": {"name": "1"},
     "class": "omawrite",
     "title": "Unsaved Kids Mode note",
     "pinned": false,

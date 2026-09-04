@@ -30,7 +30,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
   .name == "Omarchy Kids Mode" and
-  .version == "0.15.2" and
+  .version == "0.15.4" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -260,6 +260,131 @@ assert.deepEqual(
 )
 assert.equal(result.restore.index, 1)
 
+const installedPlugins = {
+  "omarchy.menu": {kinds: ["menu", "bar-widget"], __isFirstParty: true},
+  "omarchy.clock": {kinds: ["bar-widget"], __isFirstParty: true},
+  "omarchy.audio": {kinds: ["bar-widget"], __isFirstParty: true},
+  "omarchy.clipboard": {kinds: ["overlay"], __isFirstParty: true},
+  "omarchy.osd": {kinds: ["panel"], __isFirstParty: true},
+  "omarchy.hybrid": {kinds: ["service", "panel"], __isFirstParty: true},
+  "omarchy.media": {kinds: ["service", "bar-widget"], __isFirstParty: true},
+  "omarchy.notifications": {kinds: ["service"], __isFirstParty: true},
+  "third.party.panel": {kinds: ["panel"]},
+  "third.party.widget": {kinds: ["service", "bar-widget"]},
+  [pluginId]: {kinds: ["menu", "bar-widget", "service"]}
+}
+const policyConfig = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [{id: "omarchy.menu"}, {id: "eelg.workspaces"}, {id: pluginId}],
+      center: [{id: "omarchy.clock"}],
+      right: [{id: "third.party.widget"}, {id: "omarchy.audio"}]
+    }
+  },
+  plugins: [{id: "third.party.panel", setting: "preserved"}],
+  disabledPlugins: ["omarchy.audio", "omarchy.emojis"]
+}
+result = integration.activate(
+  policyConfig, pluginId, managerId, managerPath, true, installedPlugins)
+assert.deepEqual(policyConfig.plugins, [])
+assert.deepEqual(policyConfig.bar.layout.left.map(integration.entryId), [pluginId, "eelg.workspaces"])
+assert.deepEqual(
+  policyConfig.bar.layout.right.map(integration.entryId),
+  [managerId, ...integration.KIDS_CONTROL_IDS]
+)
+assert.equal(policyConfig.disabledPlugins.includes("omarchy.audio"), false)
+assert.deepEqual(policyConfig.disabledPlugins.slice().sort(), [
+  "omarchy.clipboard", "omarchy.clock", "omarchy.emojis", "omarchy.hybrid",
+  "omarchy.menu", "omarchy.osd"
+])
+assert.equal(
+  integration.kidsPluginPolicyMatches(
+    policyConfig, installedPlugins, pluginId, managerId),
+  true
+)
+policyConfig.bar.layout.right.unshift({id: "third.party.widget"})
+assert.equal(
+  integration.kidsPluginPolicyMatches(
+    policyConfig, installedPlugins, pluginId, managerId),
+  false
+)
+policyConfig.bar.layout.right.shift()
+policyConfig.disabledPlugins = policyConfig.disabledPlugins.filter(
+  id => id !== "omarchy.clock"
+)
+assert.equal(
+  integration.kidsPluginPolicyMatches(
+    policyConfig, installedPlugins, pluginId, managerId),
+  false
+)
+integration.applyKidsPluginPolicy(policyConfig, installedPlugins, pluginId)
+assert.equal(
+  integration.kidsPluginPolicyMatches(
+    policyConfig, installedPlugins, pluginId, managerId),
+  true
+)
+assert.deepEqual(result.barRestore.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+assert.deepEqual(result.barRestore.disabledPlugins, ["omarchy.audio", "omarchy.emojis"])
+assert.deepEqual(
+  integration.hiddenPluginIds(installedPlugins, pluginId).slice().sort(),
+  [
+    "omarchy.clipboard", "omarchy.clock", "omarchy.hybrid", "omarchy.media",
+    "omarchy.menu", "omarchy.osd", "third.party.panel", "third.party.widget"
+  ]
+)
+const firstPolicyRestore = JSON.parse(JSON.stringify(result.barRestore))
+result = integration.activate(
+  policyConfig, pluginId, managerId, managerPath, true, installedPlugins)
+assert.deepEqual(result.barRestore, firstPolicyRestore)
+assert.deepEqual(policyConfig.plugins, [])
+result = integration.activate(
+  policyConfig, pluginId, managerId, managerPath, false, installedPlugins)
+assert.deepEqual(policyConfig.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+assert.deepEqual(policyConfig.disabledPlugins, ["omarchy.audio", "omarchy.emojis"])
+assert.deepEqual(policyConfig.bar.layout.center, [{id: "omarchy.clock"}])
+assert.deepEqual(
+  policyConfig.bar.layout.right.map(integration.entryId),
+  [managerId, "third.party.widget", "omarchy.audio"]
+)
+
+const policyRemovalConfig = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [{id: "omarchy.menu"}, {id: "eelg.workspaces"}, {id: pluginId}],
+      center: [{id: "omarchy.clock"}],
+      right: [{id: "third.party.widget"}, {id: "omarchy.audio"}]
+    }
+  },
+  plugins: [{id: "third.party.panel", setting: "preserved"}],
+  disabledPlugins: ["omarchy.audio", "omarchy.emojis"]
+}
+result = integration.activate(
+  policyRemovalConfig, pluginId, managerId, managerPath, true, installedPlugins)
+integration.deactivate(
+  policyRemovalConfig,
+  pluginId,
+  managerId,
+  result.restore,
+  result.barRestore
+)
+assert.deepEqual(policyRemovalConfig.bar.layout.left.map(integration.entryId), [
+  "omarchy.menu", "eelg.workspaces"
+])
+assert.deepEqual(policyRemovalConfig.bar.layout.center, [{id: "omarchy.clock"}])
+assert.deepEqual(policyRemovalConfig.bar.layout.right, [
+  {id: "third.party.widget"}, {id: "omarchy.audio"}
+])
+assert.deepEqual(policyRemovalConfig.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+assert.deepEqual(policyRemovalConfig.disabledPlugins, ["omarchy.audio", "omarchy.emojis"])
+
 const noStockConfig = {
   version: 1,
   bar: {layout: {left: [{id: pluginId}], center: [], right: []}},
@@ -376,28 +501,6 @@ jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper does not report a clean inactive state"
 
-window_collision_dir=$(mktemp -d)
-collision_log=$window_collision_dir/hyprctl.log
-if window_result=$(
-  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
-    XDG_STATE_HOME="$window_collision_dir" \
-    OMARCHY_KIDS_HYPRCTL="$window_mock" \
-    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
-    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
-    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
-    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
-    OMARCHY_KIDS_TEST_WINDOW_LOG="$collision_log" \
-    "$WINDOW_SESSION" enter
-); then
-  fail "window-session helper accepts an existing Kids workspace"
-fi
-jq -e '.action == "enter" and .status == "workspace-in-use" and .failed == 1' \
-  <<< "$window_result" >/dev/null \
-  && [[ ! -f $window_collision_dir/omarchy-kids/windows.json ]] \
-  && [[ ! -s $collision_log ]] \
-  || fail "window-session helper does not reject a workspace name collision safely"
-rm -rf -- "$window_collision_dir"
-
 window_result=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_test_dir" \
@@ -411,8 +514,9 @@ window_result=$(
 jq -e '.action == "enter" and .status == "active" and .hidden == 2
   and .expected == 2 and .failed == 0' <<< "$window_result" >/dev/null \
   && jq -e '.originalActiveWorkspace == "work"
-    and .originalActiveMonitor == "DP-2"' \
+    and .originalActiveMonitor == "DP-2" and .kidsWorkspace == "1"' \
     "$window_test_dir/omarchy-kids/windows.json" >/dev/null \
+  && tail -n 1 "$window_log" | rg -Fq 'workspace = "1"' \
   || fail "window-session helper does not confirm every hidden window"
 
 if window_result=$(
@@ -493,7 +597,7 @@ if window_result=$(
 fi
 jq -e '.status == "restore-failed" and .failed > 0' \
   <<< "$window_result" >/dev/null \
-  && tail -n 1 "$focus_log" | rg -Fq 'workspace = "name:omarchy-kids"' \
+  && tail -n 1 "$focus_log" | rg -Fq 'workspace = "1"' \
   || fail "window-session helper does not return to Kids workspace after compensation"
 HYPRLAND_INSTANCE_SIGNATURE=test-instance \
   XDG_STATE_HOME="$window_focus_dir" \
@@ -579,40 +683,6 @@ workspace_focus_line=$(rg -nF 'hl.dsp.focus({ workspace = "name:work" })' "$mult
     && $monitor_focus_line -lt $workspace_focus_line ]] \
   || fail "window-session helper does not restore the original monitor before its workspace"
 
-window_residual_dir=$(mktemp -d)
-residual_log=$window_residual_dir/hyprctl.log
-residual_marker=$window_residual_dir/client-query.marker
-HYPRLAND_INSTANCE_SIGNATURE=test-instance \
-  XDG_STATE_HOME="$window_residual_dir" \
-  OMARCHY_KIDS_HYPRCTL="$window_mock" \
-  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
-  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
-  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
-  OMARCHY_KIDS_TEST_WINDOW_LOG="$residual_log" \
-  "$WINDOW_SESSION" enter >/dev/null
-if window_result=$(
-  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
-    XDG_STATE_HOME="$window_residual_dir" \
-    OMARCHY_KIDS_HYPRCTL="$window_mock" \
-    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
-    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
-    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=3 \
-    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$residual_marker" \
-    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
-    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
-    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
-    OMARCHY_KIDS_TEST_WINDOW_LOG="$residual_log" \
-    "$WINDOW_SESSION" exit
-); then
-  fail "window-session helper accepts a residual Kids workspace"
-fi
-jq -e '.status == "restore-failed" and .workspaceRemoved == false
-  and .evacuated == 3 and .failed > 0' <<< "$window_result" >/dev/null \
-  && jq -e '.active == true and .status == "restore-failed"' \
-    "$window_residual_dir/omarchy-kids/windows.json" >/dev/null \
-  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd|eee)' "$residual_log" \
-  || fail "window-session helper does not retain a failed workspace disappearance check"
-
 window_misdirected_dir=$(mktemp -d)
 misdirected_log=$window_misdirected_dir/hyprctl.log
 misdirected_marker=$window_misdirected_dir/client-query.marker
@@ -639,7 +709,7 @@ if window_result=$(
 ); then
   fail "window-session helper trusts successful but misdirected dispatches"
 fi
-jq -e '.status == "restore-failed" and .kidsRemaining == 0
+jq -e '.status == "restore-failed" and .kidsRemaining == 3
   and .workspaceRemoved == false and .failed > 0' <<< "$window_result" >/dev/null \
   && jq -e '.active == true and .status == "restore-failed"' \
     "$window_misdirected_dir/omarchy-kids/windows.json" >/dev/null \
@@ -680,7 +750,7 @@ jq -e '.status == "restore-failed" and .evacuated == 1
     "$window_refusal_dir/omarchy-kids/windows.json" >/dev/null \
   && ! rg -q 'workspace = "1".*address:0xaaa' "$refusal_log" \
   && ! rg -q 'workspace = "name:work".*address:0xbbb' "$refusal_log" \
-  && tail -n 1 "$refusal_log" | rg -Fq 'workspace = "name:omarchy-kids"' \
+  && tail -n 1 "$refusal_log" | rg -Fq 'workspace = "1"' \
   || fail "window-session helper reveals parent windows after a refused close"
 
 window_reused_dir=$(mktemp -d)
@@ -780,7 +850,7 @@ HYPRLAND_INSTANCE_SIGNATURE=test-instance \
   OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
   OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
   "$WINDOW_SESSION" enter >/dev/null
-if window_result=$(
+window_result=$(
   HYPRLAND_INSTANCE_SIGNATURE=restarted-instance \
     XDG_STATE_HOME="$window_stale_dir" \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
@@ -788,28 +858,12 @@ if window_result=$(
     OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
     OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
     "$WINDOW_SESSION" exit
-); then
-  fail "window-session helper accepts an unverified stale session"
-fi
-jq -e '.status == "restore-failed" and .workspaceRemoved == false
-  and .kidsRemaining == 3' <<< "$window_result" >/dev/null \
-  && jq -e '.active == true and .status == "restore-failed"' \
-    "$window_stale_dir/omarchy-kids/windows.json" >/dev/null \
-  || fail "window-session helper does not retain a stale session with Kids state"
-window_result=$(
-  HYPRLAND_INSTANCE_SIGNATURE=restarted-instance \
-    XDG_STATE_HOME="$window_stale_dir" \
-    OMARCHY_KIDS_HYPRCTL="$window_mock" \
-    OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
-    OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces" \
-    OMARCHY_KIDS_TEST_WINDOW_LOG="$stale_log" \
-    "$WINDOW_SESSION" exit
 )
 jq -e '.status == "stale-session" and .workspaceRemoved == true
   and .kidsRemaining == 0 and .failed == 0' <<< "$window_result" >/dev/null \
   && jq -e '.active == false and .status == "stale-session"' \
     "$window_stale_dir/omarchy-kids/windows.json" >/dev/null \
-  || fail "window-session helper cannot verify a clean restarted compositor"
+  || fail "window-session helper cannot discard state from a restarted compositor"
 
 window_cleanup_dir=$(mktemp -d)
 cleanup_log=$window_cleanup_dir/hyprctl.log
@@ -908,7 +962,7 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
 rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cleanup_dir" \
   "$window_stale_dir" "$window_hotplug_dir" "$window_legacy_dir" "$window_refusal_dir" \
   "$window_reused_dir" "$window_misdirected_dir" \
-  "$window_residual_dir" "$window_multi_dir" "$window_missing_dir" "$window_test_dir"
+  "$window_multi_dir" "$window_missing_dir" "$window_test_dir"
 
 shortcut_test_dir=$(mktemp -d)
 shortcut_log=$shortcut_test_dir/hyprctl.log

@@ -45,6 +45,7 @@ Item {
   property var barLayoutRestore: null
   property bool shellModeApplied: false
   property bool shellPolicySynced: false
+  property bool shellConfigWriteInProgress: false
   property int shellSetupAttempts: 0
   property bool shortcutPolicyApplied: false
   property bool shortcutPolicySynced: false
@@ -523,23 +524,18 @@ Item {
     var enteringSucceeded = action === "enter" && exitCode === 0
       && (status === "active" || status === "already-active")
     var restoredSession = status === "restored"
-      && result.workspaceRemoved === true
       && Number(result.kidsRemaining || 0) === 0
     var staleSession = status === "stale-session"
-      && result.workspaceRemoved === true
       && Number(result.kidsRemaining || 0) === 0
     var alreadyInactive = status === "inactive" && !root.windowSessionApplied
-      && result.workspaceRemoved === true
       && Number(result.kidsRemaining || 0) === 0
     var exitingSucceeded = action === "exit" && exitCode === 0
       && (restoredSession || staleSession || alreadyInactive)
 
     if (!enteringSucceeded && !exitingSucceeded) {
-      root.windowSessionError = action === "enter" && status === "workspace-in-use"
-        ? "A workspace named omarchy-kids is already in use"
-        : action === "enter"
-          ? "Could not hide existing windows"
-          : "Could not restore hidden windows"
+      root.windowSessionError = action === "enter"
+        ? "Could not hide existing windows"
+        : "Could not restore hidden windows"
       if (result && Number(result.failed || 0) > 0)
         root.windowSessionError += " (" + Number(result.failed) + " failed)"
       if (action === "enter") {
@@ -677,6 +673,38 @@ Item {
     if (typeof liveBar.applyBarConfig === "function") liveBar.applyBarConfig()
   }
 
+  function kidsShellPolicyMatches() {
+    if (!root.shell || !root.shell.shellConfig) return false
+    var installedPlugins = root.pluginRegistry
+      ? root.pluginRegistry.installedPlugins
+      : null
+    return ShellIntegration.kidsPluginPolicyMatches(
+      root.shell.shellConfig,
+      installedPlugins,
+      root.pluginId,
+      root.managerWidgetId
+    )
+  }
+
+  function scheduleShellPolicyVerification() {
+    if (!root.modeEffectsDesired || root.shellConfigWriteInProgress) return
+    shellPolicyVerification.restart()
+  }
+
+  function verifyShellPolicy() {
+    if (!root.modeEffectsDesired
+        || (root.modePhase !== "entering" && root.modePhase !== "active"))
+      return
+    if (root.kidsShellPolicyMatches()) return
+
+    // FileView reloads and other plugin writes can arrive just after the
+    // initial mutation. Treat the settled shell config as authoritative and
+    // reapply Kids Mode instead of leaving an unrestricted bar on screen.
+    root.shellPolicySynced = false
+    root.shellModeApplied = false
+    root.scheduleShellIntegration()
+  }
+
   function syncShellIntegration() {
     if (!root.modeStateLoaded || !root.shell
         || typeof root.shell.mutateShellConfig !== "function"
@@ -684,27 +712,45 @@ Item {
       return false
 
     try {
-      // The stock menu is deliberately unavailable while Kids Mode is active:
-      // without clonedFrom, its IPC route cannot be redirected safely.
-      if (root.modeEffectsDesired && typeof root.shell.hide === "function")
-        root.shell.hide(ShellIntegration.STOCK_MENU_ID)
+      // Close every currently open plugin surface that is not part of the
+      // Kids Mode allowlist before disabling it in shell.json.
+      var installedPlugins = root.pluginRegistry
+        ? root.pluginRegistry.installedPlugins
+        : null
+      if (root.modeEffectsDesired && typeof root.shell.hide === "function") {
+        var hiddenPluginIds = ShellIntegration.hiddenPluginIds(
+          installedPlugins, root.pluginId)
+        for (var i = 0; i < hiddenPluginIds.length; i++)
+          root.shell.hide(hiddenPluginIds[i])
+      }
 
-      root.shell.mutateShellConfig(function(config) {
-        var result = ShellIntegration.activate(
-          config,
-          root.pluginId,
-          root.managerWidgetId,
-          root.managerWidgetPath,
-          root.modeEffectsDesired
-        )
-        if (result && result.restore) root.stockMenuRestore = result.restore
-        root.barLayoutRestore = result && result.barRestore
-          ? result.barRestore
-          : null
-      })
+      root.shellConfigWriteInProgress = true
+      try {
+        root.shell.mutateShellConfig(function(config) {
+          var result = ShellIntegration.activate(
+            config,
+            root.pluginId,
+            root.managerWidgetId,
+            root.managerWidgetPath,
+            root.modeEffectsDesired,
+            installedPlugins
+          )
+          if (result && result.restore) root.stockMenuRestore = result.restore
+          root.barLayoutRestore = result && result.barRestore
+            ? result.barRestore
+            : null
+        })
+      } finally {
+        root.shellConfigWriteInProgress = false
+      }
       root.refreshLiveBar()
+
+      if (root.modeEffectsDesired && !root.kidsShellPolicyMatches())
+        return false
+
       root.shellModeApplied = root.modeEffectsDesired
       root.shellPolicySynced = true
+      root.scheduleShellPolicyVerification()
       if (root.modeEffectsDesired) root.advanceActivation()
       else root.maybeCompleteDeactivation()
       return true
@@ -908,6 +954,12 @@ Item {
   }
 
   Timer {
+    id: shellPolicyVerification
+    interval: 350
+    onTriggered: root.verifyShellPolicy()
+  }
+
+  Timer {
     id: windowSessionSync
     interval: 250
     onTriggered: root.syncWindowSession()
@@ -930,6 +982,15 @@ Item {
   onShellChanged: {
     root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
+  }
+
+  Connections {
+    target: root.shell
+    function onShellConfigChanged() { root.scheduleShellPolicyVerification() }
+  }
+  Connections {
+    target: root.pluginRegistry
+    function onPluginsChanged() { root.scheduleShellPolicyVerification() }
   }
   onManifestChanged: {
     root.scheduleShellIntegration()
