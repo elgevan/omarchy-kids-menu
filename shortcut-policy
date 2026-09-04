@@ -216,6 +216,19 @@ lua_program='hl.window_rule({
   no_initial_focus = true,
   pin = false,
 })
+-- Parking a window on a special workspace does not prevent activation from
+-- revealing that workspace. Hide its contents in the compositor as well as
+-- refusing application-driven focus, including windows that already existed.
+for _, workspace in ipairs({"special:omarchy-kids-parent", "special:omarchy-kids-quarantine"}) do
+  hl.window_rule({
+    name = "omarchy-kids-hidden-" .. workspace,
+    match = { workspace = workspace },
+    opacity = "0 override 0 override",
+    no_focus = true,
+    focus_on_activate = false,
+    no_anim = true,
+  })
+end
 hl.define_submap("omarchy-kids", function()'
 changed=1
 

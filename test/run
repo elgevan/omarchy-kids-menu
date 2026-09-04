@@ -640,6 +640,47 @@ jq -e '.action == "status" and .status == "active" and .hidden == 2' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper cannot identify durable active recovery state"
 
+# Creation order can differ from the left/right order on the adult desktop.
+# Verify that restoration swaps tiled windows back and rejects an ineffective swap.
+window_order_dir=$(mktemp -d)
+(
+  export HYPRLAND_INSTANCE_SIGNATURE=test-instance XDG_STATE_HOME="$window_order_dir"
+  export OMARCHY_KIDS_HYPRCTL="$window_mock"
+  export OMARCHY_KIDS_TEST_WINDOW_LOG="$window_order_dir/hyprctl.log"
+  export OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active"
+  export OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace"
+  export OMARCHY_KIDS_TEST_CLIENTS="$window_order_dir/original.json"
+  jq 'map(.workspace.name = "work" | .pid = 4242 | .floating = false | .pinned = false
+    | .at = (if .address == "0xaaa" then [1000, 20] else [0, 20] end))' \
+    "$window_clients" > "$OMARCHY_KIDS_TEST_CLIENTS"
+  "$WINDOW_SESSION" enter >/dev/null
+  jq -e 'all(.windows[]; (.at | length) == 2)' \
+    "$window_order_dir/omarchy-kids/windows.json" >/dev/null || fail "window positions were not saved"
+  cp "$window_order_dir/omarchy-kids/windows.json" "$window_order_dir/snapshot.json"
+  jq 'map(.workspace.name = "special:omarchy-kids-parent")' \
+    "$window_order_dir/original.json" > "$window_order_dir/hidden.json"
+  jq 'map(.at[0] = (1000 - .at[0]))' \
+    "$window_order_dir/original.json" > "$window_order_dir/reversed.json"
+  export OMARCHY_KIDS_TEST_CLIENTS="$window_order_dir/hidden.json"
+  export OMARCHY_KIDS_TEST_POST_CLIENTS="$window_order_dir/reversed.json"
+  export OMARCHY_KIDS_TEST_POST_SWAP_CLIENTS="$window_order_dir/original.json"
+  export OMARCHY_KIDS_TEST_EXPECT_MOVE_COUNT=2
+  : > "$OMARCHY_KIDS_TEST_WINDOW_LOG"
+  "$WINDOW_SESSION" exit | jq -e '.status == "restored" and .restored == 2' >/dev/null \
+    || fail "reversed tiled windows were not restored"
+  rg -Fq 'hl.dsp.window.swap({ target = "address:0xaaa" })' "$OMARCHY_KIDS_TEST_WINDOW_LOG" \
+    || fail "restoration never corrected the reversed tile order"
+  cp "$window_order_dir/snapshot.json" "$window_order_dir/omarchy-kids/windows.json"
+  unset OMARCHY_KIDS_TEST_POST_SWAP_CLIENTS
+  rm -f "$OMARCHY_KIDS_TEST_WINDOW_LOG.clients"
+  : > "$OMARCHY_KIDS_TEST_WINDOW_LOG"
+  if "$WINDOW_SESSION" exit > "$window_order_dir/refused.json"; then
+    fail "restoration accepted a swap that did not restore window order"
+  fi
+  jq -e '.status == "restore-failed"' "$window_order_dir/refused.json" >/dev/null
+)
+rm -rf -- "$window_order_dir"
+
 # New windows start in a compositor-owned quarantine. The event-driven guard
 # admits a selected app only after a launch authorization, quarantines unknown
 # and unlaunched selected-class processes, and sends windows from a captured
@@ -1192,6 +1233,44 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
   && [[ ! -e $dirty_runtime/omarchy-kids/shortcut-policy.active ]] \
   && ! rg -q 'hl\.dsp\.window\.(close|move)' "$window_dirty_inactive_dir/hyprctl.log" \
   || fail "cleanup claims an unrelated workspace when there is no active session"
+
+# Window membership alone is insufficient: a parked workspace can be visible
+# on another monitor without any of its clients moving.
+visibility_dir=$(mktemp -d)
+jq 'map(.specialWorkspace = {id: 0, name: ""})
+  | .[0].specialWorkspace = {id: -98, name: "special:omarchy-kids-parent"}' \
+  "$window_monitors" > "$visibility_dir/visible.json"
+jq 'map(.specialWorkspace = {id: 0, name: ""})' \
+  "$window_monitors" > "$visibility_dir/hidden.json"
+jq 'map(.workspace.name = "special:omarchy-kids-parent")' \
+  "$guard_entry_clients" > "$visibility_dir/clients.json"
+for closes in true false; do
+  : > "$visibility_dir/hyprctl.log"
+  set +e
+  result=$(HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_guard_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$visibility_dir/clients.json" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$guard_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$visibility_dir/hyprctl.log" \
+    OMARCHY_KIDS_TEST_MONITORS="$visibility_dir/visible.json" \
+    OMARCHY_KIDS_TEST_HIDDEN_MONITORS="$visibility_dir/$([[ $closes == true ]] && echo hidden || echo visible).json" \
+    "$WINDOW_SESSION" guard '{"expectedWindows":[],"bootstrapClasses":[]}')
+  visibility_status=$?
+  set -e
+  if [[ $closes == true ]]; then
+    [[ $visibility_status == 0 ]] || fail "guard cannot close a visible adult workspace"
+    rg -Fq 'hl.dsp.focus({ monitor = "DP-1" })' "$visibility_dir/hyprctl.log" \
+      && rg -Fq 'hl.dsp.workspace.toggle_special("omarchy-kids-parent")' "$visibility_dir/hyprctl.log" \
+      && rg -Fq 'hl.dsp.focus({ monitor = "DP-2" })' "$visibility_dir/hyprctl.log" \
+      || fail "guard did not close the adult workspace on its monitor and restore focus"
+  else
+    [[ $visibility_status != 0 ]] \
+      && jq -e '.status == "admission-failed" and .failed > 0' <<<"$result" >/dev/null \
+      || fail "guard reports success while the adult workspace remains visible"
+  fi
+done
+rm -rf -- "$visibility_dir"
 
 rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cleanup_dir" \
   "$window_stale_dir" "$window_hotplug_dir" "$window_legacy_dir" "$window_refusal_dir" \

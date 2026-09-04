@@ -299,6 +299,29 @@ client_absent() {
   '
 }
 
+adult_positions_restored() {
+  hyprctl -j clients | jq -e --slurpfile saved "$ARTIFACTS/adult-positions.json" '
+    . as $clients | all($saved[0][]; . as $s |
+      any($clients[]; .address == $s.address and .at == $s.at and .size == $s.size))'
+}
+
+kids_chromium_visible() {
+  local pid command
+  while read -r pid; do
+    [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/cmdline ]] || continue
+    command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+    [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* ]] && return 0
+  done < <(hyprctl -j clients | jq -r '
+    .[] | select(.workspace.name == "1" and (.class | ascii_downcase) == "chromium") | .pid')
+  return 1
+}
+
+private_workspaces_hidden() {
+  hyprctl -j monitors | jq -e 'length > 0 and all(.[];
+    .specialWorkspace.name != "special:omarchy-kids-parent"
+    and .specialWorkspace.name != "special:omarchy-kids-quarantine")'
+}
+
 client_with_title_on_workspace() {
   local title=$1 workspace=$2
   hyprctl -j clients | jq -e --arg title "$title" --arg workspace "$workspace" '
@@ -364,12 +387,33 @@ inactive_plugin_state=$(jq -c \
 original_workspace=$(hyprctl -j activeworkspace | jq -r '.name // "1"')
 original_monitor=$(hyprctl -j activeworkspace | jq -r '.monitor // ""')
 
+adult_title=OmarchyKidsAdultVisibilityTest
+uwsm-app -- foot --title="$adult_title" sh -c 'printf "ADULT SESSION MUST STAY HIDDEN\n"; sleep 3600' \
+  >/dev/null 2>&1 &
+wait_until "adult visibility-test window opens before Kids Mode" 15 \
+  client_address_with_title "$adult_title"
+adult_address=$(client_address_with_title "$adult_title")
+adult_second_title=OmarchyKidsAdultOrderTest
+uwsm-app -- foot --title="$adult_second_title" sleep 3600 >/dev/null 2>&1 &
+wait_until "second adult window opens for layout restoration" 15 client_address_with_title "$adult_second_title"
+adult_second_address=$(client_address_with_title "$adult_second_title")
+hyprctl dispatch "hl.dsp.focus({ window = \"address:$adult_second_address\" })" >/dev/null
+hyprctl dispatch "hl.dsp.window.swap({ target = \"address:$adult_address\" })" >/dev/null
+sleep 1
+hyprctl -j clients | jq --arg first "$adult_address" --arg second "$adult_second_address" \
+  '[.[] | select(.address == $first or .address == $second) | {address, at, size}]' \
+  > "$ARTIFACTS/adult-positions.json"
+
 omarchy-shell "$MANAGER_ID" show
 wait_until "Kids Mode manager opens for first-run activation" 15 screen_contains "KIDS MODE"
 wtype -M ctrl -M shift -k k -m shift -m ctrl
 wait_until "Kids Mode activates explicitly" 20 mode_is on
 wait_until "Kids Mode starts on numbered workspace 1" 20 active_context_is "1" ""
 omarchy-shell "$MANAGER_ID" hide
+wait_until "adult workspace is hidden on every monitor" 15 private_workspaces_hidden
+hyprctl dispatch 'hl.dsp.workspace.toggle_special("omarchy-kids-parent")' >/dev/null
+wait_until "a revealed adult workspace is closed by the guard" 15 private_workspaces_hidden
+lock_is false || fail "visibility recovery unexpectedly locked the desktop"
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
 wait_until "Kids Mode limits the bar to child-safe controls" 20 kids_bar_is_limited
@@ -432,6 +476,7 @@ if command -v foot >/dev/null; then
     || fail "capture the quarantined unexpected window"
   active_context_is "1" "" \
     || fail "an unexpected window changed the child-visible workspace"
+  private_workspaces_hidden || fail "an unexpected window revealed a private workspace"
   hyprctl dispatch "hl.dsp.window.close({ window = \"address:$unexpected_address\" })" \
     >/dev/null
   wait_until "the quarantined acceptance window closes" 15 \
@@ -530,9 +575,17 @@ if desktop_present YouTube && command -v chromium >/dev/null; then
   sleep 1
   wtype -k Return
   wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
+  private_workspaces_hidden || fail "YouTube revealed an adult or quarantined workspace"
   kids_launched_address=$(kids_youtube_address)
   [[ $kids_launched_address =~ ^0x[0-9a-fA-F]+$ ]] \
     || fail "capture the Kids-launched YouTube window"
+  kids_menu_summon apps >/dev/null
+  wait_until "app menu reopens for Chromium" 15 layer_present
+  wtype -d 100 Chromium
+  wait_until "Chromium search is selected before launch" 15 screen_contains Chromium
+  wtype -k Return
+  wait_until "Chromium opens visibly beside the Kids YouTube window" 20 kids_chromium_visible
+  private_workspaces_hidden || fail "Chromium revealed an adult or quarantined workspace"
   pass "Kids web-app remains open for exit lifecycle coverage"
 else
   pass "Kids web-app profile check skipped (YouTube or Chromium absent)"
@@ -581,6 +634,7 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   wait_until "valid authentication turns Kids Mode off" 20 mode_is off
   wait_until "internal Off restores the original workspace and monitor" 20 \
     active_context_is "$original_workspace" "$original_monitor"
+  wait_until "internal Off restores both adult windows to their original positions" 20 adult_positions_restored
   if [[ -n $kids_launched_address ]]; then
     wait_until "internal Off closes the Kids-launched app" 20 \
       client_absent "$kids_launched_address"
@@ -707,4 +761,6 @@ wait_until "restored stock menu closes" 15 layer_absent
 
 trap - EXIT
 cleanup
+hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_address\" })" >/dev/null
+hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_second_address\" })" >/dev/null
 pass "Omarchy Kids Mode VM acceptance passed"

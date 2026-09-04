@@ -838,6 +838,12 @@ Item {
 
   function handleHyprlandEvent(event) {
     var name = String(event && event.name ? event.name : "")
+    if (["activespecial", "activespecialv2", "activewindowv2", "movewindow",
+         "movewindowv2", "workspace", "workspacev2", "focusedmon",
+         "monitoradded", "monitoraddedv2"].indexOf(name) >= 0) {
+      root.scheduleWindowAdmission(0)
+      return
+    }
     if (name !== "openwindow") return
     var parts = WindowAdmission.eventParts(event, 4)
     var address = WindowAdmission.normalizeAddress(parts[0])

@@ -108,6 +108,69 @@ set_window_pin() {
     "hl.dsp.window.pin({ action = $action_arg, window = $window_arg })"
 }
 
+# Moving tiled windows out of a workspace destroys their layout order. Restore
+# their spatial order explicitly instead of depending on Hyprland's client list
+# (creation order) or whichever window happens to receive focus during exit.
+restore_tiled_window_order() {
+  local saved clients desired current index address target
+  saved=$(jq -c '[.windows[] | select(.floating == false and .fullscreen == 0)
+    | select((.at | type) == "array" and (.at | length) == 2)
+    | select(all(.at[]; type == "number"))]' "$STATE_FILE") || return 1
+  [[ $saved != '[]' ]] || return 0
+  clients=$("$HYPRCTL_BIN" -j clients) || return 1
+  desired=$(jq -cn --argjson saved "$saved" --argjson clients "$clients" '
+    [$saved[] as $s | $clients[]
+      | select(.address == $s.address and .pid == $s.pid
+        and .workspace.name == $s.workspace and .floating == false)
+      | $s] | sort_by(.workspace, .at[0], .at[1])') || return 1
+  for ((index = 0; index < $(jq length <<<"$desired"); index++)); do
+    clients=$("$HYPRCTL_BIN" -j clients) || return 1
+    current=$(jq -cn --argjson saved "$desired" --argjson clients "$clients" '
+      [$clients[] | select(.address as $a | any($saved[]; .address == $a))]
+      | sort_by(.workspace.name, .at[0], .at[1]) | map(.address)') || return 1
+    address=$(jq -r --argjson i "$index" '.[$i].address' <<<"$desired")
+    target=$(jq -r --argjson i "$index" '.[$i]' <<<"$current")
+    [[ $address != "$target" ]] || continue
+    [[ $target =~ ^0x[0-9a-fA-F]+$ ]] || return 1
+    focus_window "$address" || return 1
+    "$HYPRCTL_BIN" --quiet dispatch \
+      "hl.dsp.window.swap({ target = $(lua_string "address:$target") })" || return 1
+  done
+  clients=$("$HYPRCTL_BIN" -j clients) || return 1
+  jq -en --argjson saved "$desired" --argjson clients "$clients" '
+    ([$clients[] | select(.address as $a | any($saved[]; .address == $a))]
+      | sort_by(.workspace.name, .at[0], .at[1]) | map(.address))
+    == ($saved | map(.address))' >/dev/null
+}
+
+# A special workspace can become visible without any window changing workspace.
+# Close our parking surfaces on every monitor and verify the actual visibility.
+# The compositor rules keep their contents invisible while this check runs.
+hide_private_workspaces() {
+  local monitors original_monitor monitor workspace
+  monitors=$("$HYPRCTL_BIN" -j monitors) || return 1
+  jq -e 'type == "array" and length > 0' <<<"$monitors" >/dev/null || return 1
+  original_monitor=$(jq -r '.[] | select(.focused == true) | .name' <<<"$monitors")
+  while IFS=$'\t' read -r monitor workspace; do
+    [[ -n $monitor ]] || continue
+    focus_monitor "$monitor" || return 1
+    "$HYPRCTL_BIN" --quiet dispatch \
+      "hl.dsp.workspace.toggle_special($(lua_string "${workspace#special:}"))" || return 1
+  done < <(jq -r --arg parent "$PARENT_WORKSPACE" --arg quarantine "$QUARANTINE_WORKSPACE" \
+    '.[] | select(.specialWorkspace.name == $parent or .specialWorkspace.name == $quarantine)
+      | [.name, .specialWorkspace.name] | @tsv' <<<"$monitors")
+  if jq -e --arg parent "$PARENT_WORKSPACE" --arg quarantine "$QUARANTINE_WORKSPACE" \
+      'any(.[]; .specialWorkspace.name == $parent or .specialWorkspace.name == $quarantine)' \
+      <<<"$monitors" >/dev/null && [[ -n $original_monitor ]]; then
+    focus_monitor "$original_monitor" || return 1
+  fi
+  "$HYPRCTL_BIN" -j monitors | jq -e \
+    --arg parent "$PARENT_WORKSPACE" --arg quarantine "$QUARANTINE_WORKSPACE" \
+    'type == "array" and length > 0
+      and all(.[]; .specialWorkspace.name != $parent and .specialWorkspace.name != $quarantine)' \
+    >/dev/null
+}
+
 address_in_file() {
   local address=$1 clients_file=$2
   jq -e --arg address "$address" 'any(.[]; .address == $address)' \
@@ -260,6 +323,7 @@ enter_session() {
               initialTitle: (.initialTitle // .title // ""),
               pinned: (.pinned // false),
               floating: (.floating // false),
+              at: (.at // null),
               fullscreen: (.fullscreen // 0)
             }
         ]
@@ -291,6 +355,10 @@ enter_session() {
   done < <(jq -r '.windows[] | [.address, (.pinned | tostring)] | @tsv' "$STATE_FILE")
 
   if ! focus_workspace "$KIDS_WORKSPACE"; then
+    failed=$((failed + 1))
+  fi
+
+  if ! hide_private_workspaces; then
     failed=$((failed + 1))
   fi
 
@@ -506,6 +574,10 @@ exit_session() {
     done < <(jq -r '.windows[] | @base64' "$STATE_FILE")
   fi
 
+  if ((failed == 0)) && ! restore_tiled_window_order; then
+    failed=$((failed + 1))
+  fi
+
   if ((failed == 0)) && [[ -n $original_monitor ]]; then
     if ! "$HYPRCTL_BIN" -j monitors > "$monitors_file" \
         || ! jq -e 'type == "array"' "$monitors_file" >/dev/null; then
@@ -637,6 +709,10 @@ guard_session() {
   fi
 
   hidden=$(jq -r '.windows | length' "$STATE_FILE")
+  if ! hide_private_workspaces; then
+    emit guard admission-failed "$hidden" 0 0 "$hidden" "$hidden" 0 1
+    return 1
+  fi
   if ! jq -e 'type == "object"
       and (.expectedWindows | type) == "array" and (.expectedWindows | length) <= 512
       and (.bootstrapClasses | type) == "array" and (.bootstrapClasses | length) <= 512

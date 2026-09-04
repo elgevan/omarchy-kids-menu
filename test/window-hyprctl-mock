@@ -6,6 +6,11 @@ if [[ ${1:-} == -j ]]; then
   case ${2:-} in
     clients)
       [[ ${OMARCHY_KIDS_TEST_FAIL_CLIENTS:-false} != true ]]
+      if [[ -n ${OMARCHY_KIDS_TEST_POST_SWAP_CLIENTS:-} ]] \
+          && rg -q 'hl.dsp.window.swap' "$OMARCHY_KIDS_TEST_WINDOW_LOG"; then
+        cat "$OMARCHY_KIDS_TEST_POST_SWAP_CLIENTS"
+        exit 0
+      fi
       if [[ -n ${OMARCHY_KIDS_TEST_POST_CLIENTS:-} ]]; then
         clients_marker=${OMARCHY_KIDS_TEST_CLIENTS_MARKER:-$OMARCHY_KIDS_TEST_WINDOW_LOG.clients}
         if [[ -f $clients_marker ]]; then
@@ -35,7 +40,12 @@ if [[ ${1:-} == -j ]]; then
       ;;
     monitors)
       [[ ${OMARCHY_KIDS_TEST_FAIL_MONITORS:-false} != true ]]
-      cat "$OMARCHY_KIDS_TEST_MONITORS"
+      if [[ -n ${OMARCHY_KIDS_TEST_HIDDEN_MONITORS:-} ]] \
+          && rg -q 'hl.dsp.workspace.toggle_special' "$OMARCHY_KIDS_TEST_WINDOW_LOG"; then
+        cat "$OMARCHY_KIDS_TEST_HIDDEN_MONITORS"
+      else
+        cat "$OMARCHY_KIDS_TEST_MONITORS"
+      fi
       ;;
     workspaces)
       [[ ${OMARCHY_KIDS_TEST_FAIL_WORKSPACES:-false} != true ]]

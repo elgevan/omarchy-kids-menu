@@ -69,3 +69,8 @@ If you remove the plugin while Kids Mode is active, desktop cleanup retries in t
 ```
 
 `test/vm-acceptance` runs the complete flow in a disposable Omarchy VM.
+
+When replacing an installed local copy during development, exit Kids Mode first
+and run `omarchy restart shell` after copying the files. The running shell can
+retain cached QML code across plugin rescans, so matching files alone does not
+confirm that the new version is running.
