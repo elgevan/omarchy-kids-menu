@@ -45,6 +45,17 @@ omarchy plugin remove io.github.elgevan.omarchy-kids
 
 Your app list and browser profile are kept in case you reinstall the plugin.
 
+To also delete all saved Kids Mode data, including the app list, browser
+history, bookmarks, settings, sign-ins, and internal recovery state, run:
+
+```bash
+rm -rf -- "$HOME/.config/omarchy-kids" \
+  "$HOME/.local/share/omarchy-kids" \
+  "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids"
+```
+
+This cannot be undone.
+
 ## Development
 
 Validate the plugin and run its test suite before publishing changes:
