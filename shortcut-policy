@@ -237,6 +237,7 @@ fi
 for workspace in {1..10}; do
   key_code=$((workspace + 9))
   append_lua "  hl.bind(\"SUPER + code:$key_code\", hl.dsp.focus({ workspace = \"$workspace\" }), { description = \"Kids Mode: Workspace $workspace\" })"
+  append_lua "  hl.bind(\"SUPER + SHIFT + code:$key_code\", hl.dsp.window.move({ workspace = \"$workspace\" }), { description = \"Kids Mode: Move to workspace $workspace\" })"
 done
 
 # Everyday window controls that do not expose other applications.

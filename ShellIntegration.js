@@ -1,4 +1,5 @@
 var STOCK_MENU_ID = "omarchy.menu"
+var WORKSPACES_ID = "omarchy.workspaces"
 var RESTORE_KEY = "kidsMenuRestore"
 var BAR_RESTORE_KEY = "kidsBarLayoutRestore"
 var KIDS_CONTROL_IDS = [
@@ -101,6 +102,19 @@ function entryFromLayout(layout, id) {
   return { id: id }
 }
 
+function workspacesEntryFromLayout(layout) {
+  var sections = ["left", "center", "right"]
+  for (var s = 0; s < sections.length; s++) {
+    var entries = layout[sections[s]]
+    for (var i = 0; i < entries.length; i++) {
+      var id = entryId(entries[i])
+      if (id === WORKSPACES_ID || /[.]workspaces$/.test(id))
+        return isObject(entries[i]) ? cloneJson(entries[i]) : { id: id }
+    }
+  }
+  return { id: WORKSPACES_ID }
+}
+
 function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore) {
   var pluginLocation = barLocation(config, pluginId)
   var pluginEntry = pluginLocation && isObject(pluginLocation.entry)
@@ -109,7 +123,7 @@ function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore) {
   pluginEntry.id = pluginId
   pluginEntry[BAR_RESTORE_KEY] = cloneJson(restore)
 
-  config.bar.layout.left = [pluginEntry]
+  config.bar.layout.left = [pluginEntry, workspacesEntryFromLayout(restore)]
   config.bar.layout.center = []
   config.bar.layout.right = [managerEntry(managerId, managerPath)]
   for (var i = 0; i < KIDS_CONTROL_IDS.length; i++)
@@ -241,6 +255,7 @@ function deactivate(config, pluginId, managerId, restoreValue, barRestoreValue) 
 if (typeof module !== "undefined") {
   module.exports = {
     STOCK_MENU_ID: STOCK_MENU_ID,
+    WORKSPACES_ID: WORKSPACES_ID,
     RESTORE_KEY: RESTORE_KEY,
     BAR_RESTORE_KEY: BAR_RESTORE_KEY,
     KIDS_CONTROL_IDS: KIDS_CONTROL_IDS,
@@ -250,6 +265,7 @@ if (typeof module !== "undefined") {
     normalizedRestore: normalizedRestore,
     normalizedBarRestore: normalizedBarRestore,
     barLayoutSnapshot: barLayoutSnapshot,
+    workspacesEntryFromLayout: workspacesEntryFromLayout,
     setStockMenuDisabled: setStockMenuDisabled,
     activate: activate,
     deactivate: deactivate

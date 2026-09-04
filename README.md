@@ -39,8 +39,8 @@ Starting Kids Mode temporarily:
 
 - Moves your open windows to a private workspace and opens a Kids Mode workspace.
 - Limits the Omarchy menu and selected shortcuts to the apps you chose and safe system actions.
-- Keeps `Super+1` through `Super+0` available for switching among numbered Kids Mode workspaces.
-- Limits the bar to the Kids Mode controls plus Bluetooth, Wi-Fi, volume, display, and power; your exact normal layout is restored on exit.
+- Keeps `Super+1` through `Super+0` available for switching among numbered Kids Mode workspaces, and `Super+Shift+1` through `Super+Shift+0` for moving the focused window there.
+- Limits the bar to the Kids Mode controls, workspace strip, Bluetooth, Wi-Fi, volume, display, and power; your exact normal layout is restored on exit.
 - Turns on Do Not Disturb while remembering its previous setting.
 - Launches supported browsers and web apps with the separate Kids Mode browser profile.
 

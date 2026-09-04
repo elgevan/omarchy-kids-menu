@@ -145,7 +145,10 @@ manager_absent() {
 kids_bar_is_limited() {
   jq -e --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
     def entry_id: if type == "object" then (.id // "") else . end;
-    ([.bar.layout.left[]? | entry_id] == [$plugin]) and
+    ([.bar.layout.left[]? | entry_id] as $left
+      | ($left | length) == 2
+        and $left[0] == $plugin
+        and ($left[1] == "omarchy.workspaces" or ($left[1] | endswith(".workspaces")))) and
     ([.bar.layout.center[]? | entry_id] == []) and
     ([.bar.layout.right[]? | entry_id] == [
       $manager,
@@ -159,11 +162,17 @@ kids_bar_is_limited() {
 }
 
 visible_kids_bar_is_limited() {
+  local workspace_id
+  workspace_id=$(jq -r '
+    def entry_id: if type == "object" then (.id // "") else . end;
+    .bar.layout.left[1] | entry_id
+  ' "$HOME/.config/omarchy/shell.json")
   omarchy-shell shell debugBarGeometry | jq -e \
-    --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
+    --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" \
+    --arg workspace "$workspace_id" '
       ([.[] | select(.visible == true and .itemVisible == true) | .id]
        | unique) as $visible
-      | ([$plugin, $manager,
+      | ([$plugin, $workspace, $manager,
           "omarchy.bluetooth", "omarchy.network", "omarchy.audio",
           "omarchy.monitor", "omarchy.power"]) as $allowed
       | (($visible - $allowed) | length) == 0
@@ -327,6 +336,9 @@ wait_until "Kids Mode redirects browser shortcuts" 20 \
   binding_description_present "Kids Mode: Browser"
 wait_until "Kids Mode keeps numbered workspace shortcuts" 20 \
   binding_descriptions_present "Kids Mode: Workspace 1" "Kids Mode: Workspace 10"
+wait_until "Kids Mode can move windows among numbered workspaces" 20 \
+  binding_descriptions_present \
+    "Kids Mode: Move to workspace 1" "Kids Mode: Move to workspace 10"
 wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
   binding_description_absent "Terminal"
 wait_until "Kids Mode blocks the DND bypass shortcut" 20 \
