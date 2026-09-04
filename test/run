@@ -42,11 +42,11 @@ jq -e '
   (.omarchy? == null)
 ' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
 
-rg -Fq "Exiting through the Kids Mode panel invokes Omarchy's lock screen" \
+rg -Fq 'Omarchy asks for your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'software already running as the same Linux user' \
+  && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'No sudo or pkexec is required.' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'does not need `sudo` or `pkexec`' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
     "$PLUGIN_ROOT/README.md" \
   || fail "README does not document the authentication boundary and runtime integrations"
