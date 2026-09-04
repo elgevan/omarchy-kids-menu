@@ -44,7 +44,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.15.7" and
+  .version == "0.15.8" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -62,7 +62,7 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'does not need `sudo` or `pkexec`' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
     "$PLUGIN_ROOT/README.md" \
   || fail "README does not document the authentication boundary and runtime integrations"

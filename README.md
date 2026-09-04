@@ -8,7 +8,7 @@ supported web apps use a separate browser profile.
 
 ## Install
 
-Requires Omarchy 4 with the Quattro shell, Chromium, and the standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The plugin does not install packages or download code, and it does not need `sudo` or `pkexec`.
+Requires Omarchy 4 with the Quattro shell, Chromium, and the standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The plugin does not install packages or download code and requires no elevated privileges.
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
