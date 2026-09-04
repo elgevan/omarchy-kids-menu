@@ -86,7 +86,7 @@ Item {
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
-    : "io.github.elgevan.omarchy-kids"
+    : "io.github.elgevan.kids-mode"
   readonly property string managerWidgetId: pluginId + ".manager"
   readonly property string managerWidgetPath: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/ManagerWidget.qml"

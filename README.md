@@ -1,8 +1,8 @@
-# Omarchy Kids Menu
+# Omarchy Kids Mode
 
-![Omarchy Kids Menu](preview.png)
+![Omarchy Kids Mode](preview.png)
 
-Omarchy Kids Menu adds **Kids Mode** to your desktop. When it is on, a child
+Omarchy Kids Mode adds **Kids Mode** to your desktop. When it is on, a child
 sees only the apps you choose. Your windows are hidden, shortcuts to other apps
 and settings are paused, and Chromium and supported web apps use a separate
 browser profile.
@@ -22,7 +22,12 @@ omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
 3. Click **Start Kids Mode**.
 
 The Omarchy button now opens the selected apps. To finish, open the Kids Mode
-panel and click **Exit Kids Mode**. When you leave Kids Mode, Omarchy asks for your password or fingerprint and restores your desktop as it was.
+panel and click **Exit Kids Mode**. When you leave Kids Mode, Omarchy asks for
+your password or fingerprint and restores your desktop as it was.
+
+Starting Kids Mode temporarily updates the Omarchy shell layout, notification
+state, and Hyprland session state. The plugin records the previous values before
+applying those changes and restores them when Kids Mode ends.
 
 The separate browser profile is kept between sessions at:
 
@@ -40,7 +45,7 @@ access, but software running as the same Linux user can still change the plugin'
 Exit Kids Mode, then run:
 
 ```bash
-omarchy plugin remove io.github.elgevan.omarchy-kids
+omarchy plugin remove io.github.elgevan.kids-mode
 ```
 
 Your app list and browser profile are kept in case you reinstall the plugin.

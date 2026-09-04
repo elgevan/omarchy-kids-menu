@@ -4,8 +4,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "io.github.elgevan.omarchy-kids.manager"
-  ipcTarget: "io.github.elgevan.omarchy-kids.manager"
+  moduleName: "io.github.elgevan.kids-mode.manager"
+  ipcTarget: "io.github.elgevan.kids-mode.manager"
 
   property var anchorItem: null
   property var hostWidget: null

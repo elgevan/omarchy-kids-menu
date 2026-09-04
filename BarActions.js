@@ -1,4 +1,4 @@
-var PLUGIN_ID = "io.github.elgevan.omarchy-kids"
+var PLUGIN_ID = "io.github.elgevan.kids-mode"
 
 function menuRoute(kidsModeEnabled) {
   return kidsModeEnabled === true ? "apps" : "root"

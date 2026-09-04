@@ -17,7 +17,7 @@ Loader {
 
   readonly property var sourceAppLibrary: shell ? shell.appLibrary : null
   readonly property var allowlistService: shell && typeof shell.serviceFor === "function"
-    ? shell.serviceFor("io.github.elgevan.omarchy-kids")
+    ? shell.serviceFor("io.github.elgevan.kids-mode")
     : null
   readonly property bool kidsModeEnabled: root.allowlistService
     ? root.allowlistService.kidsModeEnabled === true

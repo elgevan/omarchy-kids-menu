@@ -20,17 +20,31 @@ fail() {
   exit 1
 }
 
+runtime_fallback_test_dir=$(mktemp -d)
+runtime_fallback_result=$(
+  env -u XDG_RUNTIME_DIR \
+    HOME="$runtime_fallback_test_dir/home" \
+    XDG_STATE_HOME="$runtime_fallback_test_dir/state" \
+    "$SHORTCUT_POLICY" status
+)
+jq -e '.action == "status" and .applied == false' \
+    <<<"$runtime_fallback_result" >/dev/null \
+  && [[ -f $runtime_fallback_test_dir/state/omarchy-kids/shortcut-policy.lock ]] \
+  && ! rg -Fq '/tmp/omarchy-kids-runtime' "$SHORTCUT_POLICY" \
+  || fail "shortcut policy uses shared /tmp when XDG_RUNTIME_DIR is unavailable"
+rm -rf -- "$runtime_fallback_test_dir"
+
 [[ -f $PLUGIN_ROOT/LICENSE ]] || fail "repository license is missing"
 
 rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'omarchy plugin remove io.github.elgevan.omarchy-kids' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'omarchy plugin remove io.github.elgevan.kids-mode' "$PLUGIN_ROOT/README.md" \
   || fail "README does not include standard plugin removal instructions"
 
 jq -e '
   .schemaVersion == 1 and
-  .id == "io.github.elgevan.omarchy-kids" and
+  .id == "io.github.elgevan.kids-mode" and
   .name == "Omarchy Kids Mode" and
-  .version == "0.15.5" and
+  .version == "0.15.6" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -42,7 +56,9 @@ jq -e '
   (.omarchy? == null)
 ' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
 
-rg -Fq 'Omarchy asks for your password or fingerprint and restores your desktop as it was.' \
+rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
+    "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'Starting Kids Mode temporarily updates the Omarchy shell layout' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
@@ -145,7 +161,7 @@ const assert = require("node:assert/strict")
 const actions = require(process.argv[2])
 
 const pluginCommand = route =>
-  `omarchy-shell shell toggle io.github.elgevan.omarchy-kids '{"menu":"${route}"}'`
+  `omarchy-shell shell toggle io.github.elgevan.kids-mode '{"menu":"${route}"}'`
 
 assert.equal(actions.menuRoute(false), "root")
 assert.equal(actions.menuRoute(true), "apps")
@@ -159,7 +175,7 @@ node - "$PLUGIN_ROOT/ShellIntegration.js" <<'NODE'
 const assert = require("node:assert/strict")
 const integration = require(process.argv[2])
 
-const pluginId = "io.github.elgevan.omarchy-kids"
+const pluginId = "io.github.elgevan.kids-mode"
 const managerId = pluginId + ".manager"
 const managerPath = "/plugins/omarchy-kids/ManagerWidget.qml"
 const config = {

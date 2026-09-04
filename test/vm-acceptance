@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-PLUGIN_ID=io.github.elgevan.omarchy-kids
+PLUGIN_ID=io.github.elgevan.kids-mode
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
 MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
