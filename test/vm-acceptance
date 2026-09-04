@@ -158,6 +158,20 @@ kids_bar_is_limited() {
   ' "$HOME/.config/omarchy/shell.json"
 }
 
+visible_kids_bar_is_limited() {
+  omarchy-shell shell debugBarGeometry | jq -e \
+    --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
+      ([.[] | select(.visible == true and .itemVisible == true) | .id]
+       | unique) as $visible
+      | ([$plugin, $manager,
+          "omarchy.bluetooth", "omarchy.network", "omarchy.audio",
+          "omarchy.monitor", "omarchy.power"]) as $allowed
+      | (($visible - $allowed) | length) == 0
+        and ($visible | index($plugin)) != null
+        and ($visible | index($manager)) != null
+    '
+}
+
 bar_layout_matches() {
   local expected=$1
   jq -e --argjson expected "$expected" '.bar.layout == $expected' \
@@ -304,12 +318,15 @@ omarchy-shell "$MANAGER_ID" hide
 wait_until "kids mode enables Do Not Disturb" 20 dnd_is on
 wait_until "Kids Mode blocks the unrestricted stock menu" 20 stock_menu_blocked
 wait_until "Kids Mode limits the bar to child-safe controls" 20 kids_bar_is_limited
+wait_until "the live bar renders only child-safe controls" 20 visible_kids_bar_is_limited
 wait_until "Kids Mode redirects the normal menu shortcut" 20 \
   binding_description_present "Kids Mode: Menu"
 wait_until "Kids Mode redirects the Apps shortcut" 20 \
   binding_description_present "Kids Mode: Apps"
 wait_until "Kids Mode redirects browser shortcuts" 20 \
   binding_description_present "Kids Mode: Browser"
+wait_until "Kids Mode keeps numbered workspace shortcuts" 20 \
+  binding_descriptions_present "Kids Mode: Workspace 1" "Kids Mode: Workspace 10"
 wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
   binding_description_absent "Terminal"
 wait_until "Kids Mode blocks the DND bypass shortcut" 20 \

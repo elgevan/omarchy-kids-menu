@@ -231,7 +231,15 @@ if [[ $omacalc_allowed == true ]]; then
   append_lua "  hl.bind(\"XF86Calculator\", hl.dsp.exec_cmd([[omarchy-shell shell call $PLUGIN_ID launchAllowedApp '{\"desktopId\":\"omacalc\",\"name\":\"Omacalc\"}']]), { description = \"Kids Mode: Calculator\" })"
 fi
 
-# Everyday window controls that do not expose other workspaces or applications.
+# Numbered workspaces remain useful for separating Kids Mode apps. The parent's
+# original windows stay parked on the private workspace and the session cleanup
+# closes Kids-launched windows from every workspace before restoring them.
+for workspace in {1..10}; do
+  key_code=$((workspace + 9))
+  append_lua "  hl.bind(\"SUPER + code:$key_code\", hl.dsp.focus({ workspace = \"$workspace\" }), { description = \"Kids Mode: Workspace $workspace\" })"
+done
+
+# Everyday window controls that do not expose other applications.
 append_lua '  hl.bind("SUPER + W", hl.dsp.window.close(), { description = "Close window" })'
 append_lua '  hl.bind("SUPER + T", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle window floating/tiling" })'
 append_lua '  hl.bind("SUPER + F", hl.dsp.window.fullscreen({ mode = "fullscreen" }), { description = "Full screen" })'

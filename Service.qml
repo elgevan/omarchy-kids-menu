@@ -665,6 +665,18 @@ Item {
     shellIntegrationSetup.restart()
   }
 
+  function refreshLiveBar() {
+    var liveBar = root.shell && root.shell.bar
+    if (!liveBar) return
+
+    // persistShellConfig updates shell.json and shell.barConfig immediately,
+    // but an already-mounted bar can miss that change while plugin registry
+    // updates are happening in the same turn. Push the new object into the
+    // live bar explicitly so Kids Mode never leaves stale widgets on screen.
+    if ("barConfig" in liveBar) liveBar.barConfig = root.shell.barConfig
+    if (typeof liveBar.applyBarConfig === "function") liveBar.applyBarConfig()
+  }
+
   function syncShellIntegration() {
     if (!root.modeStateLoaded || !root.shell
         || typeof root.shell.mutateShellConfig !== "function"
@@ -690,6 +702,7 @@ Item {
           ? result.barRestore
           : null
       })
+      root.refreshLiveBar()
       root.shellModeApplied = root.modeEffectsDesired
       root.shellPolicySynced = true
       if (root.modeEffectsDesired) root.advanceActivation()
@@ -712,6 +725,7 @@ Item {
         root.barLayoutRestore
       )
     })
+    root.refreshLiveBar()
     root.barLayoutRestore = null
     root.shellModeApplied = false
     root.shellPolicySynced = true
