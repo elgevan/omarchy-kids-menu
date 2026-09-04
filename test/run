@@ -30,7 +30,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
   .name == "Omarchy Kids Mode" and
-  .version == "0.15.4" and
+  .version == "0.15.5" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and

@@ -4,6 +4,8 @@ Omarchy Kid Menu makes it easier to share the Omarchy desktop you already use wi
 
 When you start **Kids Mode**, your apps stay open but move out of view. The child starts on workspace 1 and sees only the apps you choose. Kids Mode also hides other visible shell plugins, simplifies the bar, pauses shortcuts that open other apps or settings, and turns on Do Not Disturb.
 
+New windows begin in a private quarantine while Kids Mode is active. Windows launched from selected apps through Kids Mode are admitted to the child's current workspace; unexpected windows and dialogs from the adult session remain hidden.
+
 When you leave Kids Mode, Omarchy asks for your password or fingerprint and restores your desktop as it was.
 
 This is meant for supervised use on a shared account. It helps prevent accidental access, but it is not a replacement for a separate user account, website filtering, or parental controls.
@@ -29,6 +31,8 @@ The Omarchy button now opens the chosen app list. Numbered workspace shortcuts s
 To return to your desktop, open the Kids Mode panel and click **Exit Kids Mode**. After you unlock the screen, Kids Mode closes its apps and restores your windows, workspaces, shortcuts, menu, bar, and notification setting.
 
 If an app asks for confirmation before closing, Kids Mode stays active so you can answer it safely. The password check protects the exit button, but software running as the same Linux user can still change the plugin's files or turn it off.
+
+If a protection cannot be maintained or the saved mode state cannot be verified, Kids Mode keeps the adult desktop hidden and locks the screen. Restoring the desktop from that state requires another successful password or fingerprint check.
 
 ## Chromium profile
 

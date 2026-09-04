@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.elgevan.omarchy-kids",
   "name": "Omarchy Kids Mode",
-  "version": "0.15.4",
+  "version": "0.15.5",
   "author": "elgevan",
   "license": "MIT",
   "description": "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile.",
