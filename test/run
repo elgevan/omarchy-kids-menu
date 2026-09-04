@@ -30,7 +30,8 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
   .name == "Omarchy Kids Mode" and
-  .version == "0.14.3" and
+  .version == "0.14.4" and
+  .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
@@ -40,6 +41,15 @@ jq -e '
   .barWidget.description == "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Mode is active." and
   (.omarchy? == null)
 ' "$MANIFEST" >/dev/null || fail "manifest does not declare a standalone namespaced menu/bar/service plugin"
+
+rg -Fq "Exiting through the Kids Mode panel invokes Omarchy's lock screen" \
+    "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'software already running as the same Linux user' \
+    "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'No sudo or pkexec is required.' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
+    "$PLUGIN_ROOT/README.md" \
+  || fail "README does not document the authentication boundary and runtime integrations"
 
 jq -e . "$MENU" >/dev/null || fail "Kids Mode menu is not valid JSONC/JSON"
 jq -e 'keys | length == 0' "$EMPTY_MENU" >/dev/null || fail "menu extension guard is not empty"
@@ -759,6 +769,7 @@ window_cleanup_refusal_dir=$(mktemp -d)
 cleanup_refusal_log=$window_cleanup_refusal_dir/hyprctl.log
 cleanup_refusal_marker=$window_cleanup_refusal_dir/client-query.marker
 cleanup_refusal_runtime=$window_cleanup_refusal_dir/runtime
+cleanup_refusal_error=$window_cleanup_refusal_dir/cleanup.err
 mkdir -p "$cleanup_refusal_runtime/omarchy-kids"
 printf 'version=1\n' > "$cleanup_refusal_runtime/omarchy-kids/shortcut-policy.active"
 HYPRLAND_INSTANCE_SIGNATURE=test-instance \
@@ -785,13 +796,15 @@ if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_refusal_log" \
     OMARCHY_KIDS_CLOSE_ATTEMPTS=1 \
     OMARCHY_KIDS_CLOSE_INTERVAL=0 \
-    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"; then
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY" \
+    2>"$cleanup_refusal_error"; then
   fail "detached lifecycle cleanup accepts a refused Kids-app close"
 fi
-[[ -f $cleanup_refusal_runtime/omarchy-kids/shortcut-policy.active ]] \
+[[ ! -e $cleanup_refusal_runtime/omarchy-kids/shortcut-policy.active ]] \
   && jq -e '.active == true and .status == "restore-failed"' \
     "$window_cleanup_refusal_dir/omarchy-kids/windows.json" >/dev/null \
-  || fail "detached lifecycle cleanup releases restrictions after a refused close"
+  && rg -Fq 'shortcut restrictions were released' "$cleanup_refusal_error" \
+  || fail "detached lifecycle cleanup does not release shortcuts while preserving failed window recovery"
 
 window_dirty_inactive_dir=$(mktemp -d)
 dirty_runtime=$window_dirty_inactive_dir/runtime

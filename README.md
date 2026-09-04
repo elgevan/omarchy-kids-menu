@@ -12,12 +12,16 @@ When Kids Mode starts, it:
 - Limits shortcuts that would open other apps or settings.
 - Turns on Do Not Disturb.
 
-Exiting Kids Mode requires your account password or a configured fingerprint. Apps opened during Kids Mode receive a normal close request, then your apps, workspaces, shortcuts, and notification settings are restored. If an app needs confirmation before closing, Kids Mode stays active so the prompt can be handled safely.
+Exiting through the Kids Mode panel invokes Omarchy's lock screen and requires your account password or a configured fingerprint. Apps opened during Kids Mode receive a normal close request, then your apps, workspaces, shortcuts, and notification settings are restored. If an app needs confirmation before closing, Kids Mode stays active so the prompt can be handled safely.
 
-## Requirements
+## Requirements and integrations
 
 - Omarchy 4 with the Quattro shell
-- Chromium installed at `/usr/bin/chromium`
+- Omarchy's Hyprland runtime, lock service, and notification service
+- The standard Omarchy command-line tools: `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app`
+- Chromium installed at `/usr/bin/chromium` for browser and web-app support
+
+No sudo or pkexec is required. The plugin does not install packages or download code, and it performs no network fetches of its own. Apps and websites opened in the separate Chromium profile can use the network normally.
 
 ## Install
 
@@ -52,7 +56,7 @@ If shortcut restoration exhausts its automatic retries, the exact failure is ret
 
 The top-left Omarchy button opens the normal root menu while Kids Mode is inactive and the chosen app list while Kids Mode is active. Like the stock Omarchy button, right-clicking it opens the terminal while Kids Mode is inactive; the terminal action is suppressed while Kids Mode is active. The default app selections are Google Chrome, Chromium, Omawrite, and Omacalc when those apps are installed.
 
-While Kids Mode is active, the app selection is locked. Open the manager and click **Exit Kids Mode** to return to your desktop. Omarchy will lock the screen and complete the switch after a successful password or fingerprint check.
+While Kids Mode is active, the app selection is locked. Open the manager and click **Exit Kids Mode** to return to your desktop. Omarchy will lock the screen and complete the switch after a successful password or fingerprint check. This authentication protects the panel action; software already running as the same Linux user can still modify the plugin's state files or disable the plugin.
 
 ## Separate browser profile
 
@@ -70,7 +74,7 @@ Kids Mode does not filter websites. Browser content controls should be configure
 
 ## What it protects
 
-Kids Mode simplifies the desktop and helps prevent accidental access to your open apps. It is intended for supervised use on a shared account, not as a replacement for a separate Linux user account or system-level parental controls.
+Kids Mode simplifies the desktop and helps prevent accidental access to your open apps. It is intended for supervised use on a shared account, not as a replacement for a separate Linux user account or system-level parental controls. It is not a security boundary against software running under that account.
 
 ## Remove
 
@@ -79,6 +83,14 @@ omarchy plugin remove io.github.elgevan.omarchy-kids
 ```
 
 Removing the plugin restores the normal menu, shortcuts, windows, and notification settings. The chosen app list and Kids Mode browser profile are kept so they can be used again after reinstalling.
+
+If a Kids Mode app refuses to close during removal, the plugin keeps your original windows hidden and preserves its recovery snapshot rather than exposing a partially restored desktop. After the cleanup retries finish, normal shortcuts are restored so you are not left in the plugin's shortcut layer. Resolve the app's close prompt, then retry window restoration with:
+
+```bash
+"${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/omarchy-kids/tools/window-session" exit
+```
+
+If that runtime helper is no longer present, signing out closes the remaining session windows and clears the temporary runtime state.
 
 ## Test
 

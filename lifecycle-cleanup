@@ -14,9 +14,10 @@ MAX_ATTEMPTS=${OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS:-30}
 [[ $MAX_ATTEMPTS =~ ^[1-9][0-9]*$ ]] || MAX_ATTEMPTS=30
 
 # Component destruction cannot await a Process. Give any execDetached launch a
-# short mapping window, then retain the shortcut restrictions unless verified
-# window/workspace cleanup succeeds. Retries cover a late-mapping client or a
-# close confirmation that is resolved after a prior helper attempt.
+# short mapping window, then retry window/workspace cleanup while a late-mapping
+# client or close confirmation settles. If cleanup never succeeds, release the
+# shortcut layer anyway: the plugin UI no longer exists after removal, so
+# retaining its submap would leave the user without an in-session recovery path.
 sleep "$SETTLE_SECONDS"
 attempt=0
 while ((attempt < MAX_ATTEMPTS)); do
@@ -28,5 +29,13 @@ while ((attempt < MAX_ATTEMPTS)); do
     sleep "$RETRY_SECONDS"
   fi
 done
+
+# Keep the failed window snapshot for a later recovery attempt, but do not leave
+# plugin-owned shortcut restrictions active after the plugin itself is gone.
+if "$SHORTCUT_POLICY" exit >/dev/null; then
+  printf 'Kids Mode removal could not restore every window; shortcut restrictions were released.\n' >&2
+else
+  printf 'Kids Mode removal could not restore windows or shortcuts; see shortcut-restore.json for details.\n' >&2
+fi
 
 exit 1
