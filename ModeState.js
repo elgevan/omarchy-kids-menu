@@ -1,6 +1,6 @@
 function parseEnabled(rawText) {
   var text = String(rawText || "").trim()
-  if (!text) return false
+  if (!text || text.length > 4096) return null
 
   try {
     var parsed = JSON.parse(text)
@@ -9,7 +9,7 @@ function parseEnabled(rawText) {
   } catch (error) {
   }
 
-  return false
+  return null
 }
 
 function stateText(enabled) {

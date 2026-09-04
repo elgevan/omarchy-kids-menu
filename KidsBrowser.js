@@ -41,6 +41,20 @@ function profileDir(homeDir) {
   return home + "/.local/share/omarchy-kids/chromium"
 }
 
+function windowClasses(appUrl) {
+  var classes = ["chromium"]
+  // Chromium's Wayland app id is its shortcut filename: chrome-host_path-Default.
+  // Keep this an exact class derived from the selected URL, never a chrome-* rule.
+  var match = String(appUrl || "").match(/^https?:\/\/([^/?#]+)(\/[^?#]*)?/i)
+  if (!match) return classes
+  var host = match[1].replace(/^.*@/, "").replace(/:\d+$/, "").toLowerCase()
+  var path = match[2] || "/"
+  var name = ("chrome-" + host + "_" + path + "-Default")
+    .replace(/[\x00-\x20<>:"/\\|?*]/g, "_")
+  classes.push(name.toLowerCase())
+  return classes
+}
+
 function launchCommand(homeDir, appUrl) {
   var command = [
     "uwsm-app",
@@ -65,6 +79,7 @@ if (typeof module !== "undefined") {
     urlFromExecString: urlFromExecString,
     webAppUrl: webAppUrl,
     profileDir: profileDir,
+    windowClasses: windowClasses,
     launchCommand: launchCommand
   }
 }

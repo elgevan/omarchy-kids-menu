@@ -71,7 +71,12 @@ const allowlist = require(process.argv[2])
 assert.deepEqual(allowlist.defaultIds(), ["chromium", "google-chrome", "omacalc", "omawrite"])
 assert.equal(allowlist.parseSettings(""), null)
 assert.equal(allowlist.parseSettings("not json"), null)
+assert.equal(allowlist.parseSettings(" ".repeat(65537)), null)
 assert.equal(allowlist.parseSettings(JSON.stringify({version: 2, allowedDesktopIds: ["chromium"]})), null)
+assert.equal(allowlist.parseSettings(JSON.stringify({
+  version: 1,
+  allowedDesktopIds: Array.from({length: 129}, (_, index) => `app-${index}`)
+})), null)
 assert.deepEqual(
   allowlist.parseSettings(JSON.stringify({version: 1, allowedDesktopIds: []})),
   []
@@ -92,6 +97,7 @@ const state = require(process.argv[2])
 
 assert.deepEqual(state.parseState(""), {managed: false, restoreDnd: false})
 assert.deepEqual(state.parseState("not json"), {managed: false, restoreDnd: false})
+assert.deepEqual(state.parseState("x".repeat(4097)), {managed: false, restoreDnd: false})
 assert.deepEqual(
   state.parseState(JSON.stringify({version: 1, managed: true, restoreDnd: true})),
   {managed: true, restoreDnd: true}
@@ -106,13 +112,32 @@ node - "$PLUGIN_ROOT/ModeState.js" <<'NODE'
 const assert = require("node:assert/strict")
 const state = require(process.argv[2])
 
-assert.equal(state.parseEnabled(""), false)
-assert.equal(state.parseEnabled("not json"), false)
+assert.equal(state.parseEnabled(""), null)
+assert.equal(state.parseEnabled("not json"), null)
+assert.equal(state.parseEnabled("x".repeat(4097)), null)
+assert.equal(state.parseEnabled(JSON.stringify({version: 2, enabled: false})), null)
 assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: false})), false)
 assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: true})), true)
 assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
 assert.deepEqual(JSON.parse(state.stateText()), {version: 1, enabled: false})
+NODE
+
+node - "$PLUGIN_ROOT/WindowAdmission.js" <<'NODE'
+const assert = require("node:assert/strict")
+const admission = require(process.argv[2])
+
+assert.deepEqual(
+  admission.classCandidates("org.example.Writer.desktop", "ExampleWriter", ["/usr/bin/writer"]),
+  ["org.example.writer.desktop", "org.example.writer", "examplewriter", "writer"]
+)
+assert.deepEqual(admission.classCandidates("chromium", "Chromium", ["uwsm-app"]), ["chromium"])
+assert.deepEqual(admission.normalizeClasses([" Chromium ", "chromium", "OMAwRiTe"]), ["chromium", "omawrite"])
+assert.equal(admission.normalizeAddress("ABC123"), "0xabc123")
+assert.equal(admission.normalizeAddress("0xDeF456"), "0xdef456")
+assert.equal(admission.normalizeAddress("not-an-address"), "")
+assert.deepEqual(admission.eventParts({data: "0xabc,1,chromium,title"}, 4), ["0xabc", "1", "chromium", "title"])
+assert.deepEqual(admission.eventParts({parse: count => ["parsed", count]}, 4), ["parsed", 4])
 NODE
 
 node - "$PLUGIN_ROOT/BarActions.js" <<'NODE'
@@ -438,6 +463,10 @@ assert.equal(
 )
 assert.equal(browser.webAppUrl([], "chromium https://youtube.com/"), "")
 assert.equal(browser.profileDir("/home/kid/"), "/home/kid/.local/share/omarchy-kids/chromium")
+assert.deepEqual(browser.windowClasses(""), ["chromium"])
+assert.deepEqual(browser.windowClasses("https://youtube.com/"), ["chromium", "chrome-youtube.com__-default"])
+assert.deepEqual(browser.windowClasses("https://EXAMPLE.com:8443/watch?v=1#x"), ["chromium", "chrome-example.com__watch-default"])
+assert.deepEqual(browser.windowClasses("not a URL"), ["chromium"])
 assert.deepEqual(browser.launchCommand("/home/kid"), [
   "uwsm-app",
   "--",
@@ -471,6 +500,23 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
+rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'function onRawEvent(event) { root.handleHyprlandEvent(event) }' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.failActiveMode("Could not maintain muted notifications")' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.failActiveMode("Could not maintain the Kids Mode shell")' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.failActiveMode(root.windowSessionError)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.failActiveMode(root.shortcutPolicyError)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'function authorizeAppLaunch(desktopId, browserRouted)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'expectedWindows: root.pendingExpectedWindows()' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'if (!root.allowlistService.authorizeAppLaunch(desktopId, true)) return' "$PLUGIN_ROOT/Menu.qml" \
+  && ! rg -Fq 'function guardAppLaunch()' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'if (root.modePhase !== "entering") return' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.beginModeStateRecovery(enabled === false ? "inactive" : "unknown")' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'id: windowSessionStatus' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.service.authorizeDeactivation()' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'String(root.lockService.lastEvent || "") === "unlocked"' "$PLUGIN_ROOT/Panel.qml" \
+  && ! rg -Fq 'root.service.retryTransition()' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "mode recovery can bypass event admission or authenticated release"
 window_test_dir=$(mktemp -d)
 window_log=$window_test_dir/hyprctl.log
 window_mock=$PLUGIN_ROOT/test/window-hyprctl-mock
@@ -501,6 +547,45 @@ jq -e '.action == "status" and .status == "inactive" and .hidden == 0' \
   <<< "$window_status" >/dev/null \
   || fail "window-session helper does not report a clean inactive state"
 
+window_invalid_state_dir=$(mktemp -d)
+mkdir -p "$window_invalid_state_dir/omarchy-kids"
+printf '{not-json\n' > "$window_invalid_state_dir/omarchy-kids/windows.json"
+if window_status=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_invalid_state_dir" \
+    "$WINDOW_SESSION" status
+); then
+  fail "window-session helper reports malformed recovery state as inactive"
+fi
+jq -e '.action == "status" and .status == "unavailable" and .failed == 1' \
+  <<< "$window_status" >/dev/null \
+  || fail "window-session helper does not fail closed on malformed recovery state"
+printf '%s\n' \
+  '{"version":1,"active":false,"status":"active","instance":"test-instance","windows":[]}' \
+  > "$window_invalid_state_dir/omarchy-kids/windows.json"
+if window_status=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_invalid_state_dir" \
+    "$WINDOW_SESSION" status
+); then
+  fail "window-session helper reports a contradictory recovery state as inactive"
+fi
+jq -e '.action == "status" and .status == "unavailable" and .failed == 1' \
+  <<< "$window_status" >/dev/null \
+  || fail "window-session helper does not reject contradictory recovery state"
+printf '%s\n' \
+  '{"version":1,"active":false,"status":"restored","instance":"test-instance","windows":[],"kidsRemaining":0,"workspaceRemoved":true}' \
+  > "$window_invalid_state_dir/omarchy-kids/windows.json"
+window_status=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_invalid_state_dir" \
+    "$WINDOW_SESSION" status
+)
+jq -e '.action == "status" and .status == "inactive"' \
+  <<< "$window_status" >/dev/null \
+  || fail "window-session helper rejects a verified restored state"
+rm -rf -- "$window_invalid_state_dir"
+
 window_result=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_test_dir" \
@@ -518,6 +603,127 @@ jq -e '.action == "enter" and .status == "active" and .hidden == 2
     "$window_test_dir/omarchy-kids/windows.json" >/dev/null \
   && tail -n 1 "$window_log" | rg -Fq 'workspace = "1"' \
   || fail "window-session helper does not confirm every hidden window"
+window_status=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_test_dir" \
+    "$WINDOW_SESSION" status
+)
+jq -e '.action == "status" and .status == "active" and .hidden == 2' \
+  <<< "$window_status" >/dev/null \
+  || fail "window-session helper cannot identify durable active recovery state"
+
+# New windows start in a compositor-owned quarantine. The event-driven guard
+# admits a selected app only after a launch authorization, quarantines unknown
+# and unlaunched selected-class processes, and sends windows from a captured
+# adult process back to the parent workspace even if they spoof an allowed class.
+window_guard_dir=$(mktemp -d)
+guard_log=$window_guard_dir/hyprctl.log
+guard_entry_clients=$window_guard_dir/entry-clients.json
+guard_live_clients=$window_guard_dir/live-clients.json
+guard_post_clients=$window_guard_dir/post-clients.json
+guard_workspace=$window_guard_dir/active-workspace.json
+guard_marker=$window_guard_dir/client-query.marker
+guard_proc=$window_guard_dir/proc
+mkdir -p "$guard_proc/500001"
+printf 'Name:\tomawrite\nPPid:\t1\n' > "$guard_proc/500001/status"
+printf '%s\n' \
+  '500001 (omawrite) S 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 12345' \
+  > "$guard_proc/500001/stat"
+jq 'map(if .address == "0xaaa" then .pid = 424242
+  elif .address == "0xbbb" then .pid = 424243 else . end)' \
+  "$window_clients" > "$guard_entry_clients"
+jq '[
+    .[] | .workspace.name = "special:omarchy-kids-parent"
+  ] + [
+    {address: "0xccc", pid: 500001, class: "omawrite", initialClass: "omawrite",
+      title: "Kids note", initialTitle: "Kids note", mapped: true, pinned: false,
+      workspace: {name: "special:omarchy-kids-quarantine"}},
+    {address: "0xeee", pid: 500002, class: "unrelated", initialClass: "unrelated",
+      title: "Unexpected", initialTitle: "Unexpected", mapped: true, pinned: false,
+      workspace: {name: "1"}},
+    {address: "0xacd", pid: 500003, class: "chromium", initialClass: "chromium",
+      title: "Background handler", initialTitle: "Background handler", mapped: true,
+      pinned: false, workspace: {name: "special:omarchy-kids-quarantine"}},
+    {address: "0xabd", pid: 424242, class: "chromium", initialClass: "chromium",
+      title: "Adult browser dialog", initialTitle: "Adult browser dialog", mapped: true,
+      pinned: false, workspace: {name: "1"}}
+  ]' "$guard_entry_clients" > "$guard_live_clients"
+jq 'map(
+    if .address == "0xccc" then .workspace.name = "1"
+    elif .address == "0xeee" then .workspace.name = "special:omarchy-kids-quarantine"
+    elif .address == "0xabd" then .workspace.name = "special:omarchy-kids-parent"
+    else . end
+  )' "$guard_live_clients" > "$guard_post_clients"
+printf '{"name":"1","monitor":"DP-2"}\n' > "$guard_workspace"
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_guard_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$guard_entry_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$guard_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+: > "$guard_log"
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_guard_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$guard_proc" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$guard_live_clients" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$guard_post_clients" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$guard_marker" \
+    OMARCHY_KIDS_TEST_EXPECT_MOVE_COUNT=3 \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$guard_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$guard_log" \
+    "$WINDOW_SESSION" guard \
+      '{"expectedWindows":[{"address":"0xccc","classes":["omawrite"]}],"bootstrapClasses":["chromium","omawrite"]}'
+)
+jq -e '.action == "guard" and .status == "active" and .blocked == 2
+  and .failed == 0' <<< "$window_result" >/dev/null \
+  && jq -e '.admissionVersion == 2
+    and .admittedProcesses == [{"pid":500001,"startTime":"12345"}]' \
+    "$window_guard_dir/omarchy-kids/windows.json" >/dev/null \
+  && rg -Fq 'workspace = "1", follow = false, window = "address:0xccc"' "$guard_log" \
+  && rg -Fq 'workspace = "special:omarchy-kids-quarantine", follow = false, window = "address:0xeee"' "$guard_log" \
+  && rg -Fq 'workspace = "special:omarchy-kids-parent", follow = false, window = "address:0xabd"' "$guard_log" \
+  && ! rg -Fq 'address:0xacd' "$guard_log" \
+  || fail "window admission does not require launch provenance or separate parent-owned windows"
+misdirected_guard_marker=$window_guard_dir/misdirected-client-query.marker
+: > "$guard_log"
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_guard_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$guard_proc" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$guard_live_clients" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$guard_live_clients" \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$misdirected_guard_marker" \
+    OMARCHY_KIDS_TEST_EXPECT_MOVE_COUNT=3 \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$guard_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$guard_log" \
+    "$WINDOW_SESSION" guard \
+      '{"expectedWindows":[],"bootstrapClasses":["chromium","omawrite"]}'
+); then
+  fail "window admission trusts successful but misdirected dispatches"
+fi
+jq -e '.action == "guard" and .status == "admission-failed" and .failed > 0' \
+  <<< "$window_result" >/dev/null \
+  || fail "window admission does not verify its final workspace policy"
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_guard_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$guard_proc" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$guard_live_clients" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$guard_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$guard_log" \
+    "$WINDOW_SESSION" guard 'not-json'
+); then
+  fail "window admission accepts a malformed class policy"
+fi
+jq -e '.action == "guard" and .status == "unavailable" and .failed == 1' \
+  <<< "$window_result" >/dev/null \
+  || fail "window admission does not fail closed on malformed policy input"
 
 if window_result=$(
   HYPRLAND_INSTANCE_SIGNATURE=test-instance \
@@ -962,7 +1168,7 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
 rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cleanup_dir" \
   "$window_stale_dir" "$window_hotplug_dir" "$window_legacy_dir" "$window_refusal_dir" \
   "$window_reused_dir" "$window_misdirected_dir" \
-  "$window_multi_dir" "$window_missing_dir" "$window_test_dir"
+  "$window_multi_dir" "$window_missing_dir" "$window_guard_dir" "$window_test_dir"
 
 shortcut_test_dir=$(mktemp -d)
 shortcut_log=$shortcut_test_dir/hyprctl.log
@@ -988,6 +1194,9 @@ jq -e '.action == "enter" and .applied == true and .changed > 0' \
   <<< "$shortcut_result" >/dev/null \
   || fail "shortcut policy does not report a successful transient layer"
 rg -Fq 'hl.define_submap("omarchy-kids", function()' "$shortcut_log" \
+  && rg -Fq 'name = "omarchy-kids-window-quarantine"' "$shortcut_log" \
+  && rg -Fq 'workspace = "special:omarchy-kids-quarantine silent"' "$shortcut_log" \
+  && rg -Fq 'no_initial_focus = true' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Menu' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Browser' "$shortcut_log" \
   && rg -Fq 'Kids Mode: Omawrite' "$shortcut_log" \

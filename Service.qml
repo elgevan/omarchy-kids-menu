@@ -1,10 +1,13 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import "Allowlist.js" as Allowlist
+import "KidsBrowser.js" as KidsBrowser
 import "ModeState.js" as ModeState
 import "NotificationState.js" as NotificationState
 import "ShellIntegration.js" as ShellIntegration
+import "WindowAdmission.js" as WindowAdmission
 
 // Shared state for the menu and its bar-panel editor. The service reads
 // DesktopEntries, writes plugin-owned state, and temporarily enables Omarchy's
@@ -28,7 +31,12 @@ Item {
   property bool modeEffectsDesired: false
   property bool controlReleaseStarted: false
   property bool modeStateLoaded: false
+  property bool modeStateRecoveryPending: false
+  property bool modeStateRecoveryFailed: false
+  property string modeStateRecoveryCandidate: "unknown"
   property bool modeWritePending: false
+  property bool deactivationAuthorized: false
+  property string errorRecoveryKind: ""
   property bool notificationStateLoaded: false
   property bool notificationStateManaged: false
   property bool notificationRestoreDnd: false
@@ -41,6 +49,8 @@ Item {
   property bool windowSessionApplied: false
   property bool windowSessionSynced: false
   property int windowGuardAttemptsRemaining: 0
+  property bool windowAdmissionPending: false
+  property var pendingLaunchAuthorizations: []
   property var stockMenuRestore: null
   property var barLayoutRestore: null
   property bool shellModeApplied: false
@@ -66,6 +76,9 @@ Item {
   readonly property var defaultDesktopIds: Allowlist.defaultIds()
   readonly property var notificationService: root.shell && typeof root.shell.serviceFor === "function"
     ? root.shell.serviceFor("omarchy.notifications")
+    : null
+  readonly property var lockService: root.shell && typeof root.shell.serviceFor === "function"
+    ? root.shell.serviceFor("omarchy.lock")
     : null
   readonly property bool notificationsMuted: root.notificationApplied
     && root.notificationService
@@ -196,17 +209,19 @@ Item {
     var firstLoad = !root.modeStateLoaded
     root.modeStateLoaded = true
     if (firstLoad) {
-      if (enabled) root.beginActivation()
-      else root.initializeInactiveMode()
+      if (enabled === true) root.beginActivation()
+      else root.beginModeStateRecovery(enabled === false ? "inactive" : "unknown")
       return
     }
 
-    // Ignore our own committed writes, but continue to honor an external state
-    // change using the same transactional path as the panel.
-    if (enabled && !root.kidsModeEnabled && root.modePhase === "inactive")
+    if (root.modeStateRecoveryPending) return
+
+    // Persisted state records recovery intent; they are not an unauthenticated
+    // command channel for releasing an active Kids Mode session.
+    if (enabled === true && !root.kidsModeEnabled && root.modePhase === "inactive")
       root.beginActivation()
-    else if (!enabled && root.kidsModeEnabled && root.modePhase === "active")
-      root.beginDeactivation()
+    else if (enabled !== true && root.kidsModeEnabled)
+      root.persistModeState()
   }
 
   function setKidsModeEnabled(enabled) {
@@ -214,8 +229,77 @@ Item {
     if (!root.modeStateLoaded) return
     if (next && !root.kidsModeEnabled && root.modePhase === "inactive")
       root.beginActivation()
-    else if (!next && root.kidsModeEnabled && root.modePhase === "active")
-      root.beginDeactivation()
+  }
+
+  function beginModeStateRecovery(candidate) {
+    root.modeStateRecoveryCandidate = candidate || "unknown"
+    root.modeStateRecoveryPending = true
+    root.modeStateRecoveryFailed = false
+    root.errorRecoveryKind = "state-probe"
+    root.modePhase = "recovering"
+    // Until durable ownership has been checked, do not run any release path.
+    root.setEffectiveMode(true)
+    if (root.runtimeToolsReady) root.probeModeState()
+    else root.prepareRuntimeTools()
+  }
+
+  function probeModeState() {
+    if (!root.modeStateRecoveryPending || !root.windowSessionTool
+        || windowSessionStatus.running)
+      return
+    windowSessionStatus.running = true
+  }
+
+  function finishModeStateRecovery(exitCode, output) {
+    if (!root.modeStateRecoveryPending) return
+    var result = root.parseWindowSessionOutput(output)
+    var status = result ? String(result.status || "") : ""
+    if (exitCode !== 0 || !result || !status || status === "unavailable") {
+      root.failModeStateRecovery("Could not verify saved Kids Mode state")
+      return
+    }
+
+    if (status === "inactive") {
+      root.modeStateRecoveryPending = false
+      root.errorRecoveryKind = ""
+      root.initializeInactiveMode()
+      if (root.modeStateRecoveryCandidate !== "inactive") root.persistModeState()
+      return
+    }
+
+    root.modeStateRecoveryPending = false
+    root.modeStateRecoveryFailed = false
+    root.errorRecoveryKind = ""
+    root.modeTransitionError = ""
+    root.modePhase = "active"
+    root.modeEffectsDesired = true
+    root.controlReleaseStarted = false
+    root.windowSessionDesired = true
+    root.windowSessionApplied = true
+    root.windowSessionSynced = true
+    root.hiddenWindowCount = Math.max(0, Number(result.hidden || 0))
+    root.notificationPolicySynced = false
+    root.shellPolicySynced = false
+    root.shortcutPolicySynced = false
+    root.setEffectiveMode(true)
+    root.persistModeState()
+    root.scheduleNotificationSetup()
+    root.scheduleShellIntegration()
+    root.scheduleShortcutPolicySync()
+    root.scheduleWindowAdmission(0)
+  }
+
+  function failModeStateRecovery(message) {
+    root.modeStateRecoveryPending = false
+    root.modeStateRecoveryFailed = true
+    root.errorRecoveryKind = "state-probe"
+    root.modeTransitionError = message || "Could not verify saved Kids Mode state"
+    root.modePhase = "error"
+    root.modeEffectsDesired = true
+    root.windowSessionDesired = true
+    root.windowSessionApplied = true
+    root.setEffectiveMode(true)
+    root.forceSafetyLock()
   }
 
   function setEffectiveMode(enabled) {
@@ -226,11 +310,15 @@ Item {
   }
 
   function initializeInactiveMode() {
+    root.modeStateRecoveryPending = false
+    root.modeStateRecoveryFailed = false
+    root.errorRecoveryKind = ""
     root.modePhase = "inactive"
     root.modeEffectsDesired = false
     root.controlReleaseStarted = false
     root.setEffectiveMode(false)
     root.windowSessionDesired = false
+    root.pendingLaunchAuthorizations = []
     root.scheduleNotificationSetup()
     root.scheduleWindowSessionSync()
     root.scheduleShellIntegration()
@@ -240,11 +328,13 @@ Item {
   function beginActivation() {
     if (!root.modeStateLoaded || root.modePhase !== "inactive") return
     root.modeTransitionError = ""
+    root.errorRecoveryKind = ""
     root.windowSessionError = ""
     root.shortcutPolicyError = ""
     root.modePhase = "entering"
     root.modeEffectsDesired = false
     root.controlReleaseStarted = false
+    root.pendingLaunchAuthorizations = []
     root.activationWaitingForTools = !root.runtimeToolsReady
     root.setEffectiveMode(true)
     if (!root.runtimeToolsReady) {
@@ -304,9 +394,22 @@ Item {
     root.persistModeState()
   }
 
+  function authorizeDeactivation() {
+    if (!root.modeStateLoaded || !root.kidsModeEnabled
+        || (root.modePhase !== "active" && root.modePhase !== "error"))
+      return false
+    root.deactivationAuthorized = true
+    if (root.modePhase === "active") return root.beginDeactivation()
+    return root.retryTransition()
+  }
+
   function beginDeactivation() {
-    if (!root.modeStateLoaded || root.modePhase !== "active") return
+    if (!root.deactivationAuthorized || !root.modeStateLoaded
+        || root.modePhase !== "active")
+      return false
+    root.deactivationAuthorized = false
     root.modeTransitionError = ""
+    root.errorRecoveryKind = "authenticated-exit"
     root.windowSessionError = ""
     root.shortcutPolicyError = ""
     root.modePhase = "exiting"
@@ -317,10 +420,11 @@ Item {
     // If an app launch is still inside its existing two-pass guard window,
     // let that window settle before the exit helper snapshots Kids clients.
     if (!root.windowLaunchGuardPending()) root.scheduleWindowSessionSync()
+    return true
   }
 
   function rollbackActivation(message) {
-    if (root.modePhase !== "entering" && root.modePhase !== "active") return
+    if (root.modePhase !== "entering") return
     root.modeTransitionError = message || "Could not start Kids Mode"
     root.activationWaitingForTools = false
     root.modePhase = "rollback"
@@ -357,11 +461,18 @@ Item {
   function failDeactivation(message) {
     if (root.modePhase !== "exiting" && root.modePhase !== "rollback") return
     root.modeTransitionError = message || "Could not restore the desktop"
+    root.errorRecoveryKind = root.modePhase === "rollback"
+      ? "activation-rollback"
+      : "authenticated-exit"
     root.modePhase = "error"
   }
 
   function retryTransition() {
-    if (root.modePhase !== "error" || !root.kidsModeEnabled) return
+    if (!root.deactivationAuthorized || root.modePhase !== "error"
+        || !root.kidsModeEnabled)
+      return false
+    root.deactivationAuthorized = false
+    root.errorRecoveryKind = "authenticated-exit"
     root.modeTransitionError = ""
     root.windowSessionError = ""
     root.shortcutPolicyError = ""
@@ -377,9 +488,30 @@ Item {
         root.modePhase = "error"
         root.modeTransitionError = "Runtime helpers are not available yet"
       }
-      return
+      return false
     }
     root.scheduleWindowSessionSync()
+    return true
+  }
+
+  function forceSafetyLock() {
+    var lock = root.lockService
+    if (!lock || typeof lock.beginLock !== "function" || lock.locked === true) return
+    if (!lock.beginLock())
+      console.warn("omarchy-kids: could not lock after a protection failure")
+  }
+
+  function failActiveMode(message) {
+    if (root.modePhase !== "active" && root.modePhase !== "error") return
+    root.modeTransitionError = message || "Kids Mode protection needs attention"
+    root.errorRecoveryKind = "protection-failure"
+    root.modePhase = "error"
+    root.modeEffectsDesired = true
+    root.windowSessionDesired = true
+    root.controlReleaseStarted = false
+    root.setEffectiveMode(true)
+    root.persistModeState()
+    root.forceSafetyLock()
   }
 
   function maybeCompleteActivation() {
@@ -392,6 +524,7 @@ Item {
 
     root.modePhase = "active"
     root.persistModeState()
+    root.scheduleWindowAdmission(0)
   }
 
   function maybeCompleteDeactivation() {
@@ -408,6 +541,9 @@ Item {
     root.setEffectiveMode(false)
     root.modePhase = "inactive"
     root.controlReleaseStarted = false
+    root.deactivationAuthorized = false
+    root.errorRecoveryKind = ""
+    root.pendingLaunchAuthorizations = []
     root.persistModeState()
     if (!preserveError) root.modeTransitionError = ""
   }
@@ -458,6 +594,7 @@ Item {
   }
 
   function scheduleNotificationSetup() {
+    if (root.modeStateRecoveryPending) return
     root.notificationSetupAttempts = 0
     notificationSetup.restart()
   }
@@ -487,7 +624,8 @@ Item {
   }
 
   function syncModeEffects() {
-    if (!root.modeStateLoaded || !root.notificationStateLoaded || !root.directoryReady)
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.notificationStateLoaded || !root.directoryReady)
       return false
     return root.modeEffectsDesired
       ? root.applyNotificationPolicy()
@@ -504,18 +642,28 @@ Item {
   }
 
   function scheduleWindowSessionSync() {
-    if (!root.modeStateLoaded || !root.windowSessionTool) return
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.windowSessionTool)
+      return
     windowSessionSync.restart()
   }
 
   function syncWindowSession() {
-    if (!root.modeStateLoaded || !root.windowSessionTool
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.windowSessionTool
         || windowSessionEnter.running || windowSessionExit.running)
       return
 
     root.windowSessionError = ""
-    if (root.windowSessionDesired) windowSessionEnter.running = true
-    else windowSessionExit.running = true
+    if (root.windowSessionDesired) {
+      windowSessionEnter.running = true
+    } else if (root.modePhase === "rollback"
+        || (root.modePhase === "exiting"
+          && root.errorRecoveryKind === "authenticated-exit")) {
+      windowSessionExit.running = true
+    } else {
+      root.failActiveMode("Blocked an unauthorized desktop restore")
+    }
   }
 
   function finishWindowSession(action, exitCode, output) {
@@ -545,6 +693,8 @@ Item {
           || status === "incomplete-session"
         if (root.modePhase === "entering")
           root.rollbackActivation(root.windowSessionError)
+        else if (root.modePhase === "active" || root.modePhase === "error")
+          root.failActiveMode(root.windowSessionError)
       } else {
         root.windowSessionApplied = true
         root.failDeactivation(root.windowSessionError)
@@ -565,16 +715,154 @@ Item {
       windowSessionSync.restart()
   }
 
-  function guardAppLaunch() {
-    if (!root.kidsModeEnabled || !root.windowSessionTool) return
+  function desktopEntryFor(desktopId) {
+    var expected = KidsBrowser.normalizeDesktopId(desktopId)
+    var entries = DesktopEntries.applications && DesktopEntries.applications.values
+      ? DesktopEntries.applications.values
+      : []
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i]
+      if (entry && KidsBrowser.normalizeDesktopId(entry.id) === expected)
+        return entry
+    }
+    return null
+  }
+
+  function classesForEntry(entry, browserRouted) {
+    if (!entry) return []
+    var values = WindowAdmission.classCandidates(
+      entry.id, entry.startupClass, entry.command)
+    if (browserRouted === true)
+      values = values.concat(KidsBrowser.windowClasses(
+        KidsBrowser.webAppUrl(entry.command, entry.execString)))
+    return WindowAdmission.normalizeClasses(values)
+  }
+
+  // Used only to migrate an active snapshot written before admissionVersion 1.
+  // Current sessions never admit a window from this list without a launch token
+  // or an already-recorded process lineage.
+  function selectedWindowClasses() {
+    var values = []
+    var entries = DesktopEntries.applications && DesktopEntries.applications.values
+      ? DesktopEntries.applications.values
+      : []
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i]
+      if (!entry || !root.isAllowed(entry.id)) continue
+      values = values.concat(WindowAdmission.classCandidates(
+        entry.id, entry.startupClass, entry.command))
+      if (KidsBrowser.isBrowser(entry.id)
+          || KidsBrowser.webAppUrl(entry.command, entry.execString))
+        values = values.concat(KidsBrowser.windowClasses(
+          KidsBrowser.webAppUrl(entry.command, entry.execString)))
+    }
+    return WindowAdmission.normalizeClasses(values)
+  }
+
+  function authorizeWindowClasses(classes) {
+    if (!root.kidsModeEnabled || root.modePhase !== "active"
+        || !root.windowSessionApplied || !root.windowSessionTool)
+      return false
+    var normalized = WindowAdmission.normalizeClasses(classes)
+    if (normalized.length === 0) return false
+    var pending = root.pendingLaunchAuthorizations.slice()
+    pending.push({classes: normalized, address: "", expiresAt: Date.now() + 15000})
+    root.pendingLaunchAuthorizations = pending
     root.windowGuardAttemptsRemaining = 2
-    windowGuardTimer.interval = 650
-    windowGuardTimer.restart()
+    root.scheduleWindowAdmission(80)
+    return true
+  }
+
+  function authorizeAppLaunch(desktopId, browserRouted) {
+    var id = KidsBrowser.normalizeDesktopId(desktopId)
+    if (!id || !root.isAllowed(id)) return false
+    return root.authorizeWindowClasses(
+      root.classesForEntry(root.desktopEntryFor(id), browserRouted === true))
+  }
+
+  function authorizeBrowserLaunch() {
+    if (!root.shortcutAllowed(["chromium", "google-chrome", "google-chrome-stable"]))
+      return false
+    return root.authorizeWindowClasses(["chromium"])
+  }
+
+  function pendingExpectedWindows() {
+    var now = Date.now()
+    var pending = []
+    var windows = []
+    for (var i = 0; i < root.pendingLaunchAuthorizations.length; i++) {
+      var authorization = root.pendingLaunchAuthorizations[i]
+      if (!authorization || Number(authorization.expiresAt || 0) < now) continue
+      pending.push(authorization)
+      var address = WindowAdmission.normalizeAddress(authorization.address)
+      if (address) windows.push({address: address, classes: authorization.classes || []})
+    }
+    root.pendingLaunchAuthorizations = pending
+    return windows
+  }
+
+  function windowAdmissionPolicyText() {
+    return JSON.stringify({
+      expectedWindows: root.pendingExpectedWindows(),
+      bootstrapClasses: root.selectedWindowClasses()
+    })
+  }
+
+  function scheduleWindowAdmission(delay) {
+    if (!root.kidsModeEnabled || !root.windowSessionApplied
+        || !root.windowSessionTool || root.modeStateRecoveryPending)
+      return
+    root.windowAdmissionPending = true
+    if (!windowSessionGuard.running) {
+      windowGuardTimer.interval = Math.max(0, Number(delay || 0))
+      windowGuardTimer.restart()
+    }
+  }
+
+  function runWindowAdmission() {
+    if (windowSessionGuard.running || !root.windowAdmissionPending) return
+    root.windowAdmissionPending = false
+    windowSessionGuard.command = [
+      root.windowSessionTool,
+      "guard",
+      root.windowAdmissionPolicyText()
+    ]
+    windowSessionGuard.running = true
   }
 
   function windowLaunchGuardPending() {
     return root.windowGuardAttemptsRemaining > 0
-      || windowGuardTimer.running || windowSessionGuard.running
+      || root.windowAdmissionPending || windowGuardTimer.running
+      || windowSessionGuard.running
+  }
+
+  function handleHyprlandEvent(event) {
+    var name = String(event && event.name ? event.name : "")
+    if (name !== "openwindow") return
+    var parts = WindowAdmission.eventParts(event, 4)
+    var address = WindowAdmission.normalizeAddress(parts[0])
+    var windowClass = WindowAdmission.normalizeClass(parts[2])
+    if (!address) return
+
+    var now = Date.now()
+    var pending = []
+    var bound = false
+    for (var i = 0; i < root.pendingLaunchAuthorizations.length; i++) {
+      var authorization = root.pendingLaunchAuthorizations[i]
+      if (!authorization || Number(authorization.expiresAt || 0) < now) continue
+      if (!bound && !authorization.address
+          && (authorization.classes || []).indexOf(windowClass) >= 0) {
+        authorization = {
+          classes: authorization.classes,
+          address: address,
+          expiresAt: authorization.expiresAt
+        }
+        bound = true
+      }
+      pending.push(authorization)
+    }
+    root.pendingLaunchAuthorizations = pending
+    root.scheduleWindowAdmission(40)
   }
 
   function shortcutAllowed(ids) {
@@ -593,13 +881,16 @@ Item {
   }
 
   function scheduleShortcutPolicySync() {
-    if (!root.modeStateLoaded || !root.shortcutPolicyTool) return
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.shortcutPolicyTool)
+      return
     root.shortcutPolicyDesiredSignature = root.shortcutPolicySignature()
     shortcutPolicySync.restart()
   }
 
   function syncShortcutPolicy() {
-    if (!root.modeStateLoaded || !root.shortcutPolicyTool || root.shortcutPolicyBusy)
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.shortcutPolicyTool || root.shortcutPolicyBusy)
       return
 
     root.shortcutPolicyBusy = true
@@ -641,6 +932,8 @@ Item {
         root.shortcutPolicyApplied = false
         if (root.modePhase === "entering")
           root.rollbackActivation(root.shortcutPolicyError)
+        else if (root.modePhase === "active" || root.modePhase === "error")
+          root.failActiveMode(root.shortcutPolicyError)
       } else {
         root.shortcutPolicyApplied = true
         root.failDeactivation(root.shortcutPolicyError)
@@ -657,6 +950,7 @@ Item {
   }
 
   function scheduleShellIntegration() {
+    if (root.modeStateRecoveryPending) return
     root.shellSetupAttempts = 0
     shellIntegrationSetup.restart()
   }
@@ -706,7 +1000,7 @@ Item {
   }
 
   function syncShellIntegration() {
-    if (!root.modeStateLoaded || !root.shell
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending || !root.shell
         || typeof root.shell.mutateShellConfig !== "function"
         || !root.managerWidgetPath || !root.pluginId)
       return false
@@ -812,7 +1106,8 @@ Item {
 
   Process {
     id: ensureDirectory
-    command: ["mkdir", "-p", root.configDir, root.stateDir, root.runtimeToolDir]
+    command: ["install", "-d", "-m", "0700",
+      root.configDir, root.stateDir, root.runtimeToolDir]
     onExited: function(exitCode) {
       root.directoryReady = exitCode === 0
       if (root.directoryReady) {
@@ -825,6 +1120,10 @@ Item {
           root.abortPendingActivation("Could not prepare Kids Mode state directories")
         else
           root.rollbackActivation("Could not prepare Kids Mode state directories")
+      } else if (root.modeStateRecoveryPending) {
+        root.failModeStateRecovery("Could not prepare Kids Mode state directories")
+      } else if (root.modePhase === "active" || root.modePhase === "error") {
+        root.failActiveMode("Could not prepare Kids Mode state directories")
       }
     }
   }
@@ -836,7 +1135,9 @@ Item {
       root.runtimeToolsReady = exitCode === 0
       root.runtimeToolsFailed = exitCode !== 0
       if (root.runtimeToolsReady) {
-        if (root.modePhase === "entering" && root.activationWaitingForTools)
+        if (root.modeStateRecoveryPending)
+          root.probeModeState()
+        else if (root.modePhase === "entering" && root.activationWaitingForTools)
           root.startActivationEffects()
         else {
           root.scheduleWindowSessionSync()
@@ -849,9 +1150,22 @@ Item {
           root.abortPendingActivation("Could not prepare runtime helpers")
         else if (root.modePhase === "entering")
           root.rollbackActivation("Could not prepare runtime helpers")
+        else if (root.modeStateRecoveryPending)
+          root.failModeStateRecovery("Could not prepare runtime helpers")
+        else if (root.modePhase === "active" || root.modePhase === "error")
+          root.failActiveMode("Could not prepare runtime helpers")
         else if (root.modePhase === "exiting" || root.modePhase === "rollback")
           root.failDeactivation("Could not prepare runtime helpers")
       }
+    }
+  }
+
+  Process {
+    id: windowSessionStatus
+    command: root.windowSessionTool ? [root.windowSessionTool, "status"] : []
+    stdout: StdioCollector { id: windowSessionStatusOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishModeStateRecovery(exitCode, windowSessionStatusOutput.text)
     }
   }
 
@@ -875,21 +1189,28 @@ Item {
 
   Process {
     id: windowSessionGuard
-    command: root.windowSessionTool ? [root.windowSessionTool, "guard"] : []
+    command: []
     stdout: StdioCollector { id: windowSessionGuardOutput; waitForEnd: true }
     onExited: function(exitCode) {
       var result = root.parseWindowSessionOutput(windowSessionGuardOutput.text)
-      if (exitCode === 0 && result && Number(result.blocked || 0) > 0) {
+      if (exitCode !== 0 || !result) {
+        if (root.modePhase === "entering")
+          root.rollbackActivation("Could not enforce window admission")
+        else
+          root.failActiveMode("Could not enforce window admission")
+      } else if (Number(result.blocked || 0) > 0) {
         Quickshell.execDetached([
           "omarchy-notification-send",
-          "That app is already open outside Kids Mode and remains hidden."
+          "A window not approved for Kids Mode remains hidden."
         ])
       }
 
-      root.windowGuardAttemptsRemaining--
-      if (root.windowGuardAttemptsRemaining > 0 && root.kidsModeEnabled) {
-        windowGuardTimer.interval = 1200
-        windowGuardTimer.restart()
+      if (root.windowGuardAttemptsRemaining > 0)
+        root.windowGuardAttemptsRemaining--
+      if (root.windowAdmissionPending && root.kidsModeEnabled) {
+        root.scheduleWindowAdmission(0)
+      } else if (root.windowGuardAttemptsRemaining > 0 && root.kidsModeEnabled) {
+        root.scheduleWindowAdmission(1200)
       } else if ((root.modePhase === "exiting" || root.modePhase === "rollback")
           && !root.windowSessionDesired) {
         root.scheduleWindowSessionSync()
@@ -926,8 +1247,10 @@ Item {
       } else if (root.notificationSetupAttempts >= 100) {
         console.warn("omarchy-kids: notification service was not ready")
         stop()
-        if (root.modePhase === "entering" || root.modePhase === "active")
+        if (root.modePhase === "entering")
           root.rollbackActivation("Could not mute notifications")
+        else if (root.modePhase === "active")
+          root.failActiveMode("Could not maintain muted notifications")
         else if (root.modePhase === "exiting" || root.modePhase === "rollback")
           root.failDeactivation("Could not restore notification settings")
       }
@@ -945,8 +1268,10 @@ Item {
       } else if (root.shellSetupAttempts >= 100) {
         console.warn("omarchy-kids: shell integration was not ready")
         stop()
-        if (root.modePhase === "entering" || root.modePhase === "active")
+        if (root.modePhase === "entering")
           root.rollbackActivation("Could not update the Omarchy shell")
+        else if (root.modePhase === "active")
+          root.failActiveMode("Could not maintain the Kids Mode shell")
         else if (root.modePhase === "exiting" || root.modePhase === "rollback")
           root.failDeactivation("Could not restore the Omarchy shell")
       }
@@ -973,10 +1298,8 @@ Item {
 
   Timer {
     id: windowGuardTimer
-    interval: 650
-    onTriggered: {
-      if (!windowSessionGuard.running) windowSessionGuard.running = true
-    }
+    interval: 80
+    onTriggered: root.runWindowAdmission()
   }
 
   onShellChanged: {
@@ -991,6 +1314,10 @@ Item {
   Connections {
     target: root.pluginRegistry
     function onPluginsChanged() { root.scheduleShellPolicyVerification() }
+  }
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
   onManifestChanged: {
     root.scheduleShellIntegration()

@@ -35,11 +35,15 @@ function defaultIds() {
 
 function parseSettings(rawText) {
   var text = String(rawText || "").trim()
-  if (!text) return null
+  if (!text || text.length > 65536) return null
 
   try {
     var parsed = JSON.parse(text)
-    if (parsed && parsed.version === 1 && Array.isArray(parsed.allowedDesktopIds))
+    if (parsed && parsed.version === 1 && Array.isArray(parsed.allowedDesktopIds)
+        && parsed.allowedDesktopIds.length <= 128
+        && parsed.allowedDesktopIds.every(function(value) {
+          return typeof value === "string" && value.length > 0 && value.length <= 256
+        }))
       return normalizeIds(parsed.allowedDesktopIds)
   } catch (error) {
   }

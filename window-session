@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -Eeuo pipefail
+umask 077
 
 ACTION=${1:-status}
 HYPRCTL_BIN=${OMARCHY_KIDS_HYPRCTL:-hyprctl}
@@ -8,11 +9,14 @@ STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids
 STATE_FILE=$STATE_DIR/windows.json
 LOCK_FILE=$STATE_DIR/windows.lock
 PARENT_WORKSPACE=special:omarchy-kids-parent
+QUARANTINE_WORKSPACE=special:omarchy-kids-quarantine
 KIDS_WORKSPACE=1
+PROC_ROOT=${OMARCHY_KIDS_PROC_ROOT:-/proc}
 
 mkdir -p -- "$STATE_DIR"
+chmod 700 "$STATE_DIR"
 exec 9>"$LOCK_FILE"
-flock -x 9
+flock -w 5 -x 9
 
 emit() {
   jq -cn \
@@ -232,6 +236,8 @@ enter_session() {
         version: 1,
         active: true,
         status: "entering",
+        admissionVersion: 2,
+        admittedProcesses: [],
         instance: $instance,
         parentWorkspace: $parentWorkspace,
         kidsWorkspace: $kidsWorkspace,
@@ -622,7 +628,8 @@ exit_session() {
 }
 
 guard_session() {
-  local instance hidden=0 blocked=0
+  local instance hidden=0 blocked=0 failed=0 moved=0
+  local policy_json=${1:-}
   instance=$(current_instance)
   if [[ -z $instance ]] || ! session_for_instance "$instance"; then
     emit guard inactive
@@ -630,49 +637,275 @@ guard_session() {
   fi
 
   hidden=$(jq -r '.windows | length' "$STATE_FILE")
-  local address workspace clients_json
-  if ! clients_json=$($HYPRCTL_BIN -j clients 2>/dev/null); then
+  if ! jq -e 'type == "object"
+      and (.expectedWindows | type) == "array" and (.expectedWindows | length) <= 512
+      and (.bootstrapClasses | type) == "array" and (.bootstrapClasses | length) <= 512
+      and all(.expectedWindows[];
+        type == "object"
+        and (.address | type) == "string" and (.address | test("^0x[0-9a-fA-F]+$"))
+        and (.classes | type) == "array" and (.classes | length) > 0 and (.classes | length) <= 32
+        and all(.classes[]; type == "string" and length > 0 and length <= 256))
+      and all(.bootstrapClasses[]; type == "string" and length > 0 and length <= 256)' \
+      <<<"$policy_json" >/dev/null 2>&1; then
     emit guard unavailable "$hidden" 0 0 "$hidden" 0 0 1
     return 1
   fi
-  while IFS= read -r address; do
-    [[ $address =~ ^0x[0-9a-fA-F]+$ ]] || continue
-    if ! jq -e --arg address "$address" 'any(.[]; .address == $address)' \
-        <<<"$clients_json" >/dev/null; then
+
+  local clients_file expected_file bootstrap_file admitted_file new_admitted_file
+  local active_workspace_file moved_targets_file post_clients_file state_tmp
+  clients_file=$(mktemp "$STATE_DIR/guard-clients.XXXXXX")
+  expected_file=$(mktemp "$STATE_DIR/guard-expected.XXXXXX")
+  bootstrap_file=$(mktemp "$STATE_DIR/guard-bootstrap.XXXXXX")
+  admitted_file=$(mktemp "$STATE_DIR/guard-admitted.XXXXXX")
+  new_admitted_file=$(mktemp "$STATE_DIR/guard-new-admitted.XXXXXX")
+  active_workspace_file=$(mktemp "$STATE_DIR/guard-workspace.XXXXXX")
+  moved_targets_file=$(mktemp "$STATE_DIR/guard-targets.XXXXXX")
+  post_clients_file=$(mktemp "$STATE_DIR/guard-post-clients.XXXXXX")
+  state_tmp=$(mktemp "$STATE_DIR/windows.XXXXXX")
+  trap 'rm -f -- "$clients_file" "$expected_file" "$bootstrap_file" "$admitted_file" "$new_admitted_file" "$active_workspace_file" "$moved_targets_file" "$post_clients_file" "$state_tmp"' RETURN
+
+  local bootstrapping=false
+  if jq -e '.admissionVersion == null and .admittedProcesses == null' \
+      "$STATE_FILE" >/dev/null 2>&1; then
+    bootstrapping=true
+  elif ! jq -e '.admissionVersion == 2 and (.admittedProcesses | type) == "array"
+      and (.admittedProcesses | length) <= 512
+      and all(.admittedProcesses[];
+        type == "object" and (.pid | type) == "number" and (.pid | floor) == .pid
+        and .pid > 0 and (.startTime | type) == "string"
+        and (.startTime | test("^[0-9]+$")))' \
+      "$STATE_FILE" >/dev/null 2>&1; then
+    emit guard unavailable "$hidden" 0 0 "$hidden" 0 0 1
+    return 1
+  fi
+
+  if ! jq -c '.expectedWindows
+          | map({address: (.address | ascii_downcase), classes: (.classes | map(ascii_downcase) | unique)})' \
+        <<<"$policy_json" >"$expected_file" \
+      || ! jq -c '.bootstrapClasses | map(ascii_downcase) | unique' \
+        <<<"$policy_json" >"$bootstrap_file" \
+      || ! jq -c 'if .admissionVersion == 2 and (.admittedProcesses | type) == "array"
+          then .admittedProcesses else [] end | unique_by(.pid, .startTime)' \
+        "$STATE_FILE" >"$admitted_file" \
+      || ! "$HYPRCTL_BIN" -j clients >"$clients_file" 2>/dev/null \
+      || ! jq -e 'type == "array"' "$clients_file" >/dev/null; then
+    emit guard unavailable "$hidden" 0 0 "$hidden" 0 0 1
+    return 1
+  fi
+
+  local visible_workspace=$KIDS_WORKSPACE
+  if "$HYPRCTL_BIN" -j activeworkspace >"$active_workspace_file" 2>/dev/null \
+      && jq -e 'type == "object"' "$active_workspace_file" >/dev/null; then
+    local active_workspace
+    active_workspace=$(jq -r '.name // ""' "$active_workspace_file")
+    if [[ -n $active_workspace && $active_workspace != special:* ]]; then
+      visible_workspace=$(workspace_selector "$active_workspace")
+    fi
+  fi
+
+  parent_owned_pid() {
+    local pid=${1:-0} parent depth=0
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+    while ((pid > 1 && depth < 64)); do
+      if jq -e --argjson pid "$pid" \
+          'any(.windows[]; (.pid // 0) == $pid)' "$STATE_FILE" >/dev/null; then
+        return 0
+      fi
+      [[ -r $PROC_ROOT/$pid/status ]] || return 1
+      parent=$(awk '$1 == "PPid:" { print $2; exit }' "$PROC_ROOT/$pid/status")
+      [[ $parent =~ ^[0-9]+$ && $parent -ne $pid ]] || return 1
+      pid=$parent
+      depth=$((depth + 1))
+    done
+    return 1
+  }
+
+  process_start_time() {
+    local pid=${1:-0} stat_line fields
+    [[ $pid =~ ^[1-9][0-9]*$ && -r $PROC_ROOT/$pid/stat ]] || return 1
+    IFS= read -r stat_line <"$PROC_ROOT/$pid/stat" || return 1
+    fields=${stat_line##*) }
+    awk '{print $20}' <<<"$fields" | grep -Eq '^[0-9]+$' || return 1
+    awk '{print $20}' <<<"$fields"
+  }
+
+  admitted_owned_pid() {
+    local pid=${1:-0} parent start_time depth=0
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+    while ((pid > 1 && depth < 64)); do
+      start_time=$(process_start_time "$pid") || return 1
+      if jq -e --argjson pid "$pid" --arg startTime "$start_time" \
+          'any(.[]; .pid == $pid and .startTime == $startTime)' \
+          "$admitted_file" >/dev/null; then
+        return 0
+      fi
+      [[ -r $PROC_ROOT/$pid/status ]] || return 1
+      parent=$(awk '$1 == "PPid:" { print $2; exit }' "$PROC_ROOT/$pid/status")
+      [[ $parent =~ ^[0-9]+$ && $parent -ne $pid ]] || return 1
+      pid=$parent
+      depth=$((depth + 1))
+    done
+    return 1
+  }
+
+  local row client address workspace pid pinned window_class initial_class target
+  local saved_match class_selected class_expected process_admitted newly_admitted
+  while IFS= read -r row; do
+    client=$(base64 -d <<<"$row")
+    address=$(jq -r '.address // ""' <<<"$client")
+    workspace=$(jq -r '.workspace.name // ""' <<<"$client")
+    pid=$(jq -r '.pid // 0' <<<"$client")
+    pinned=$(jq -r '.pinned // false' <<<"$client")
+    window_class=$(jq -r '.class // "" | ascii_downcase' <<<"$client")
+    initial_class=$(jq -r '.initialClass // "" | ascii_downcase' <<<"$client")
+    if [[ ! $address =~ ^0x[0-9a-fA-F]+$ ]]; then
+      failed=$((failed + 1))
       continue
     fi
-    workspace=$(jq -r --arg address "$address" \
-      '.[] | select(.address == $address) | .workspace.name // empty' \
-      <<<"$clients_json")
-    [[ $workspace == "$PARENT_WORKSPACE" ]] && continue
 
-    if move_window "$PARENT_WORKSPACE" "$address"; then
-      blocked=$((blocked + 1))
+    saved_match=false
+    if jq -e --argjson client "$client" '
+        def saved_matches($saved; $current):
+          $current.address == $saved.address
+          and (($saved.pid // 0) == 0
+            or ($current.pid // 0) == ($saved.pid // 0))
+          and (($saved.initialClass // "") == ""
+            or ($current.initialClass // $current.class // "") == $saved.initialClass)
+          and (($saved.initialTitle // "") == ""
+            or ($current.initialTitle // $current.title // "") == $saved.initialTitle);
+        any(.windows[]; saved_matches(.; $client))
+      ' "$STATE_FILE" >/dev/null; then
+      saved_match=true
     fi
-  done < <(jq -r '.windows[].address' "$STATE_FILE")
 
-  if ((blocked > 0)); then
-    focus_workspace "$KIDS_WORKSPACE" || true
+    class_selected=false
+    if jq -e --arg class "$window_class" --arg initialClass "$initial_class" \
+        'index($class) != null or index($initialClass) != null' \
+        "$bootstrap_file" >/dev/null; then
+      class_selected=true
+    fi
+    class_expected=false
+    if jq -e --arg address "${address,,}" --arg class "$window_class" \
+        --arg initialClass "$initial_class" \
+        'any(.[]; .address == $address
+          and ((.classes | index($class)) != null
+            or (.classes | index($initialClass)) != null))' \
+        "$expected_file" >/dev/null; then
+      class_expected=true
+    fi
+    process_admitted=false
+    if admitted_owned_pid "$pid"; then process_admitted=true; fi
+
+    target=""
+    if [[ $saved_match == true ]] || parent_owned_pid "$pid"; then
+      if [[ $workspace != "$PARENT_WORKSPACE" ]]; then
+        target=$PARENT_WORKSPACE
+        blocked=$((blocked + 1))
+      fi
+    elif [[ $class_selected == true \
+        && ($process_admitted == true || $class_expected == true || $bootstrapping == true) ]]; then
+      if [[ $process_admitted != true && $pid =~ ^[1-9][0-9]*$ ]]; then
+        if start_time=$(process_start_time "$pid"); then
+          jq -cn --argjson pid "$pid" --arg startTime "$start_time" \
+            '{pid: $pid, startTime: $startTime}' >>"$new_admitted_file"
+        else
+          failed=$((failed + 1))
+          continue
+        fi
+      fi
+      if [[ $workspace == "$QUARANTINE_WORKSPACE" ]]; then target=$visible_workspace; fi
+    else
+      if [[ $workspace != "$QUARANTINE_WORKSPACE" ]]; then
+        target=$QUARANTINE_WORKSPACE
+        blocked=$((blocked + 1))
+      fi
+    fi
+
+    [[ -n $target ]] || continue
+    if [[ $pinned == true ]] && ! set_window_pin off "$address"; then
+      failed=$((failed + 1))
+      continue
+    fi
+
+    if move_window "$target" "$address"; then
+      moved=$((moved + 1))
+      printf '%s\t%s\n' "$address" "$target" >>"$moved_targets_file"
+    else
+      failed=$((failed + 1))
+    fi
+  done < <(jq -r '.[] | select((.mapped // true) == true) | @base64' "$clients_file")
+
+  if ((moved > 0)) && ! focus_workspace "$visible_workspace"; then
+    failed=$((failed + 1))
   fi
+  if ((moved > 0)); then
+    if ! "$HYPRCTL_BIN" -j clients >"$post_clients_file" 2>/dev/null \
+        || ! jq -e 'type == "array"' "$post_clients_file" >/dev/null; then
+      failed=$((failed + 1))
+    else
+      while IFS=$'\t' read -r address target; do
+        if ! jq -e --arg address "$address" --arg workspace "$target" \
+            'any(.[]; .address == $address
+              and (.workspace.name // "") == $workspace
+              and (.pinned // false) == false)' \
+            "$post_clients_file" >/dev/null; then
+          failed=$((failed + 1))
+        fi
+      done <"$moved_targets_file"
+    fi
+  fi
+  if ((failed > 0)); then
+    emit guard admission-failed "$hidden" 0 "$blocked" "$hidden" "$hidden" 0 "$failed"
+    return 1
+  fi
+  newly_admitted=$(jq -sc '.[0] + .[1:] | unique_by(.pid, .startTime)' \
+    "$admitted_file" "$new_admitted_file")
+  if ! jq -e 'length <= 512' <<<"$newly_admitted" >/dev/null \
+      || ! jq --argjson admittedProcesses "$newly_admitted" \
+        '.admissionVersion = 2 | .admittedProcesses = $admittedProcesses' \
+        "$STATE_FILE" >"$state_tmp"; then
+    emit guard admission-failed "$hidden" 0 "$blocked" "$hidden" "$hidden" 0 1
+    return 1
+  fi
+  mv -- "$state_tmp" "$STATE_FILE"
   emit guard active "$hidden" 0 "$blocked" "$hidden" "$hidden"
 }
 
 status_session() {
   local instance hidden=0 status
   instance=$(current_instance || true)
-  if [[ -n $instance ]] && session_for_instance "$instance"; then
+  if [[ ! -e $STATE_FILE ]]; then
+    emit status inactive
+  elif ! jq -e '.version == 1 and (.active | type) == "boolean"
+      and (.windows | type) == "array" and (.instance | type) == "string"' \
+      "$STATE_FILE" >/dev/null 2>&1; then
+    emit status unavailable 0 0 0 0 0 0 1
+    return 1
+  elif jq -e '.active == false
+      and (.status == "restored" or .status == "stale-session")
+      and (.kidsRemaining // 0) == 0 and (.workspaceRemoved // false) == true' \
+      "$STATE_FILE" >/dev/null; then
+    emit status inactive
+  elif jq -e '.active == false' "$STATE_FILE" >/dev/null; then
+    emit status unavailable 0 0 0 0 0 0 1
+    return 1
+  elif [[ -z $instance ]]; then
+    emit status unavailable 0 0 0 0 0 0 1
+    return 1
+  elif session_for_instance "$instance"; then
     hidden=$(jq -r '.windows | length' "$STATE_FILE")
     status=$(jq -r '.status // "unknown"' "$STATE_FILE")
     emit status "$status" "$hidden" 0 0 "$hidden" "$hidden"
   else
-    emit status inactive
+    hidden=$(jq -r '.windows | length' "$STATE_FILE")
+    emit status stale-session "$hidden" 0 0 "$hidden" "$hidden"
   fi
 }
 
 case "$ACTION" in
   enter) enter_session ;;
   exit) exit_session ;;
-  guard) guard_session ;;
+  guard) guard_session "${2:-}" ;;
   status) status_session ;;
   *)
     printf 'usage: %s {enter|exit|guard|status}\n' "$0" >&2

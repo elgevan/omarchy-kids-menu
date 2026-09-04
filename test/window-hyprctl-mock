@@ -9,9 +9,12 @@ if [[ ${1:-} == -j ]]; then
       if [[ -n ${OMARCHY_KIDS_TEST_POST_CLIENTS:-} ]]; then
         clients_marker=${OMARCHY_KIDS_TEST_CLIENTS_MARKER:-$OMARCHY_KIDS_TEST_WINDOW_LOG.clients}
         if [[ -f $clients_marker ]]; then
+          expected_moves=${OMARCHY_KIDS_TEST_EXPECT_MOVE_COUNT:-0}
           expected_closes=${OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT:-0}
+          actual_moves=$(rg -c 'hl\.dsp\.window\.move' "$OMARCHY_KIDS_TEST_WINDOW_LOG" 2>/dev/null || true)
           actual_closes=$(rg -c 'hl\.dsp\.window\.close' "$OMARCHY_KIDS_TEST_WINDOW_LOG" 2>/dev/null || true)
-          if ((actual_closes >= expected_closes)); then
+          if ((expected_moves > 0 && actual_moves >= expected_moves)) \
+              || ((expected_moves == 0 && actual_closes >= expected_closes)); then
             cat "$OMARCHY_KIDS_TEST_POST_CLIENTS"
           else
             cat "$OMARCHY_KIDS_TEST_CLIENTS"

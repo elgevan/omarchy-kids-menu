@@ -15,7 +15,6 @@ Panel {
   property int installedAppCount: 0
   property int installedAllowedCount: 0
   property bool awaitingUnlock: false
-  property bool lockObserved: false
   property string authError: ""
 
   readonly property var barIdentity: hostWidget || root
@@ -117,11 +116,6 @@ Panel {
     if (!root.service || !root.modeActionEnabled) return
     root.authError = ""
 
-    if (root.modePhase === "error") {
-      root.service.retryTransition()
-      return
-    }
-
     if (root.modePhase === "inactive") {
       root.service.setKidsModeEnabled(true)
       return
@@ -133,25 +127,21 @@ Panel {
     }
 
     root.awaitingUnlock = true
-    root.lockObserved = false
     if (!root.lockService.beginLock()) {
       root.awaitingUnlock = false
       root.authError = "Could not start authentication"
       return
     }
 
-    root.lockObserved = root.lockService.locked === true
     root.close()
   }
 
-  function handleLockState() {
+  function handleLockEvent() {
     if (!root.awaitingUnlock || !root.lockService) return
-    if (root.lockService.locked) {
-      root.lockObserved = true
-    } else if (root.lockObserved) {
+    if (String(root.lockService.lastEvent || "") === "unlocked") {
       root.awaitingUnlock = false
-      root.lockObserved = false
-      if (root.service) root.service.setKidsModeEnabled(false)
+      if (root.service && !root.service.authorizeDeactivation())
+        root.authError = "Could not restore the desktop"
     }
   }
 
@@ -167,7 +157,7 @@ Panel {
     if (root.modePhase === "entering") return "PREPARING KIDS MODE…"
     if (root.modePhase === "exiting" || root.modePhase === "rollback")
       return "RESTORING DESKTOP…"
-    if (root.modePhase === "error") return "RETRY RESTORE"
+    if (root.modePhase === "error") return "AUTHENTICATE & RESTORE"
     if (root.modePhase === "active") return "EXIT KIDS MODE"
     return "START KIDS MODE"
   }
@@ -176,7 +166,8 @@ Panel {
     if (root.modePhase === "entering") return "Checking windows, shortcuts, shell, and notifications"
     if (root.modePhase === "exiting" || root.modePhase === "rollback")
       return "Kids Mode stays active until your desktop is restored"
-    if (root.modePhase === "error") return "Kids Mode is still active"
+    if (root.modePhase === "error")
+      return "Kids Mode is still active; authenticate before restoring"
     if (root.modePhase === "active") {
       return root.service.hiddenWindowCount > 0
         ? "Use your password or fingerprint to restore " + root.service.hiddenWindowCount + " windows"
@@ -199,7 +190,7 @@ Panel {
 
   Connections {
     target: root.lockService
-    function onLockedChanged() { root.handleLockState() }
+    function onLastEventChanged() { root.handleLockEvent() }
   }
 
   KeyboardPanel {
@@ -237,6 +228,7 @@ Panel {
 
           Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: root.authError.length > 0
               ? root.authError
               : root.service && root.service.modeTransitionError.length > 0
@@ -544,6 +536,7 @@ Panel {
 
               Text {
                 width: parent.width
+                textFormat: Text.PlainText
                 text: appRow.appName
                 color: root.foreground
                 font.family: root.fontFamily
@@ -555,6 +548,7 @@ Panel {
               Text {
                 visible: text.length > 0
                 width: parent.width
+                textFormat: Text.PlainText
                 text: appRow.appDetail
                 color: root.dim
                 font.family: root.fontFamily

@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -Eeuo pipefail
+umask 077
 
 PLUGIN_ID=io.github.elgevan.omarchy-kids
 HYPRCTL_BIN=${OMARCHY_KIDS_HYPRCTL:-hyprctl}
@@ -122,7 +123,7 @@ chmod 700 "$STATE_DIR"
 [[ $RESTORE_ATTEMPTS =~ ^[1-9][0-9]*$ ]] || RESTORE_ATTEMPTS=5
 [[ $RESTORE_RETRY_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || RESTORE_RETRY_SECONDS=0.2
 exec 9>"$LOCK_FILE"
-flock 9
+flock -w 5 9
 
 action=${1:-}
 case $action in
@@ -205,8 +206,18 @@ if jq -e 'any(.[]; (.submap // "") == "omarchy-kids")' \
   exit 1
 fi
 
-lua_program='hl.define_submap("omarchy-kids", function()'
-changed=0
+# Every new toplevel starts in a silent private workspace. Service.qml consumes
+# Hyprland openwindow events and admits only windows matching the selected apps;
+# unknown windows never flash on a child-visible workspace first.
+lua_program='hl.window_rule({
+  name = "omarchy-kids-window-quarantine",
+  match = { class = ".*" },
+  workspace = "special:omarchy-kids-quarantine silent",
+  no_initial_focus = true,
+  pin = false,
+})
+hl.define_submap("omarchy-kids", function()'
+changed=1
 
 append_lua() {
   printf -v lua_program '%s\n%s' "$lua_program" "$1"

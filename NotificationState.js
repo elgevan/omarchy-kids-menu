@@ -1,7 +1,7 @@
 function parseState(rawText) {
   var fallback = { managed: false, restoreDnd: false }
   var text = String(rawText || "").trim()
-  if (!text) return fallback
+  if (!text || text.length > 4096) return fallback
 
   try {
     var parsed = JSON.parse(text)
