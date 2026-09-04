@@ -58,6 +58,8 @@ If shortcut restoration exhausts its automatic retries, the exact failure is ret
 
 The top-left Omarchy button opens the normal root menu while Kids Mode is inactive and the chosen app list while Kids Mode is active. Like the stock Omarchy button, right-clicking it opens the terminal while Kids Mode is inactive; the terminal action is suppressed while Kids Mode is active. The default app selections are Google Chrome, Chromium, Omawrite, and Omacalc when those apps are installed.
 
+Some keyboard shortcuts change in Kids Mode. Workspace switching and window movement still work, but shortcuts that open other apps or desktop settings are unavailable until Kids Mode ends.
+
 While Kids Mode is active, the app selection is locked. Open the manager and click **Exit Kids Mode** to return to your desktop. Omarchy will lock the screen and complete the switch after a successful password or fingerprint check. This authentication protects the panel action; software already running as the same Linux user can still modify the plugin's state files or disable the plugin.
 
 ## Separate browser profile
