@@ -9,7 +9,13 @@ if [[ ${1:-} == -j ]]; then
       if [[ -n ${OMARCHY_KIDS_TEST_POST_CLIENTS:-} ]]; then
         clients_marker=${OMARCHY_KIDS_TEST_CLIENTS_MARKER:-$OMARCHY_KIDS_TEST_WINDOW_LOG.clients}
         if [[ -f $clients_marker ]]; then
-          cat "$OMARCHY_KIDS_TEST_POST_CLIENTS"
+          expected_closes=${OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT:-0}
+          actual_closes=$(rg -c 'hl\.dsp\.window\.close' "$OMARCHY_KIDS_TEST_WINDOW_LOG" 2>/dev/null || true)
+          if ((actual_closes >= expected_closes)); then
+            cat "$OMARCHY_KIDS_TEST_POST_CLIENTS"
+          else
+            cat "$OMARCHY_KIDS_TEST_CLIENTS"
+          fi
         else
           printf 'queried\n' > "$clients_marker"
           cat "$OMARCHY_KIDS_TEST_CLIENTS"
@@ -52,6 +58,11 @@ if [[ ${1:-} == --quiet && ${2:-} == dispatch ]]; then
   if [[ $operation == *'hl.dsp.window.pin'* \
       && -n ${OMARCHY_KIDS_TEST_FAIL_PIN_ADDRESS:-} \
       && $operation == *"address:${OMARCHY_KIDS_TEST_FAIL_PIN_ADDRESS}"* ]]; then
+    exit 1
+  fi
+  if [[ $operation == *'hl.dsp.window.close'* \
+      && -n ${OMARCHY_KIDS_TEST_FAIL_CLOSE_ADDRESS:-} \
+      && $operation == *"address:${OMARCHY_KIDS_TEST_FAIL_CLOSE_ADDRESS}"* ]]; then
     exit 1
   fi
   if [[ $operation == *'hl.dsp.focus'* \

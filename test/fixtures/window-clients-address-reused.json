@@ -1,0 +1,34 @@
+[
+  {
+    "address": "0xaaa",
+    "mapped": true,
+    "workspace": {"name": "omarchy-kids"},
+    "class": "replacement",
+    "initialClass": "replacement",
+    "title": "Kids replacement",
+    "initialTitle": "Kids replacement",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xbbb",
+    "mapped": true,
+    "workspace": {"name": "special:omarchy-kids-parent"},
+    "class": "second",
+    "title": "Second",
+    "pinned": false,
+    "floating": true,
+    "fullscreen": 0
+  },
+  {
+    "address": "0xeee",
+    "mapped": true,
+    "workspace": {"name": "other"},
+    "class": "unrelated",
+    "title": "Unrelated post-entry window",
+    "pinned": false,
+    "floating": false,
+    "fullscreen": 0
+  }
+]

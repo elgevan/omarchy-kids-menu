@@ -17,6 +17,7 @@ RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
 RUNTIME_TOOL_DIR="$RUNTIME_ROOT/omarchy-kids/tools"
 SHORTCUT_MARKER="$RUNTIME_ROOT/omarchy-kids/shortcut-policy.active"
 kids_launched_address=""
+removal_kids_address=""
 original_workspace=""
 original_monitor=""
 
@@ -213,10 +214,10 @@ kids_youtube_address() {
   ' | head -1
 }
 
-client_workspace_is() {
-  local address=$1 workspace=$2
-  hyprctl -j clients | jq -e --arg address "$address" --arg workspace "$workspace" '
-    any(.[]; .address == $address and .workspace.name == $workspace)
+client_absent() {
+  local address=$1
+  hyprctl -j clients | jq -e --arg address "$address" '
+    all(.[]; .address != $address)
   '
 }
 
@@ -428,8 +429,8 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
     active_context_is "$original_workspace" "$original_monitor"
   wait_until "internal Off removes the named Kids workspace" 20 kids_workspace_absent
   if [[ -n $kids_launched_address ]]; then
-    wait_until "internal Off evacuates the Kids-launched app" 20 \
-      client_workspace_is "$kids_launched_address" "$original_workspace"
+    wait_until "internal Off closes the Kids-launched app" 20 \
+      client_absent "$kids_launched_address"
   fi
   wait_until "internal Off restores the prior DND state" 20 dnd_is "$dnd_before"
   wait_until "internal Off restores stock menu IPC" 20 stock_menu_available
@@ -485,6 +486,19 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   lock_is false || fail "turning Kids Mode on unexpectedly requested authentication"
   pass "turning Kids Mode on does not request authentication"
   omarchy-shell "$MANAGER_ID" hide
+  if desktop_present YouTube && command -v chromium >/dev/null; then
+    kids_menu_summon apps >/dev/null
+    wait_until "kids root opens for removal lifecycle launch" 15 layer_present
+    wtype YouTube -s 100 -k Return
+    wait_until "removal lifecycle app uses the Kids Chromium profile" 20 \
+      youtube_window_with_kids_profile
+    removal_kids_address=$(kids_youtube_address)
+    [[ $removal_kids_address =~ ^0x[0-9a-fA-F]+$ ]] \
+      || fail "capture the Kids-launched removal lifecycle window"
+    pass "Kids web-app remains open for direct-removal lifecycle coverage"
+  else
+    pass "direct-removal Kids app check skipped (YouTube or Chromium absent)"
+  fi
 else
   pass "authenticated in-app toggle test skipped (set OMARCHY_KIDS_TEST_PASSWORD in a disposable VM)"
 fi
@@ -509,9 +523,9 @@ wait_until "direct removal restores desktop-state shortcuts" 20 \
 wait_until "direct removal removes Kids shortcut bindings" 20 \
   binding_description_absent "Kids Mode: Menu"
 wait_until "direct removal removes the named Kids workspace" 20 kids_workspace_absent
-if [[ -n $kids_launched_address ]]; then
-  wait_until "direct removal preserves the Kids-launched app on the original workspace" 20 \
-    client_workspace_is "$kids_launched_address" "$original_workspace"
+if [[ -n $removal_kids_address ]]; then
+  wait_until "direct removal closes the Kids-launched app" 20 \
+    client_absent "$removal_kids_address"
 fi
 [[ ! -e $SHORTCUT_MARKER ]] || fail "shortcut marker remains after plugin removal"
 [[ -z $(hyprctl configerrors) ]] || fail "Hyprland reports configuration errors after shortcut restore"

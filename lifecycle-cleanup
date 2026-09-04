@@ -6,21 +6,27 @@ WINDOW_SESSION=${1:?window-session path is required}
 SHORTCUT_POLICY=${2:?shortcut-policy path is required}
 SETTLE_SECONDS=${OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS:-2}
 RETRY_SECONDS=${OMARCHY_KIDS_CLEANUP_RETRY_SECONDS:-1}
+MAX_ATTEMPTS=${OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS:-0}
 
 [[ -x $WINDOW_SESSION && -x $SHORTCUT_POLICY ]]
 [[ $SETTLE_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || SETTLE_SECONDS=2
 [[ $RETRY_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || RETRY_SECONDS=1
+[[ $MAX_ATTEMPTS =~ ^[0-9]+$ ]] || MAX_ATTEMPTS=0
 
 # Component destruction cannot await a Process. Give any execDetached launch a
 # short mapping window, then retain the shortcut restrictions unless verified
-# window/workspace cleanup succeeds. Retries cover a client that maps during a
-# prior helper attempt and is returned to Kids Mode by compensation.
+# window/workspace cleanup succeeds. Retries cover a late-mapping client or a
+# close confirmation that is resolved after a prior helper attempt.
 sleep "$SETTLE_SECONDS"
-for attempt in 1 2 3; do
+attempt=0
+while ((MAX_ATTEMPTS == 0 || attempt < MAX_ATTEMPTS)); do
+  attempt=$((attempt + 1))
   if "$WINDOW_SESSION" exit >/dev/null; then
     exec "$SHORTCUT_POLICY" exit
   fi
-  ((attempt < 3)) && sleep "$RETRY_SECONDS"
+  if ((MAX_ATTEMPTS == 0 || attempt < MAX_ATTEMPTS)); then
+    sleep "$RETRY_SECONDS"
+  fi
 done
 
 exit 1

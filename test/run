@@ -243,8 +243,11 @@ window_clients=$PLUGIN_ROOT/test/fixtures/window-clients.json
 window_clients_missing=$PLUGIN_ROOT/test/fixtures/window-clients-missing.json
 window_clients_missing_restored=$PLUGIN_ROOT/test/fixtures/window-clients-missing-restored.json
 window_clients_kids=$PLUGIN_ROOT/test/fixtures/window-clients-kids.json
+window_clients_closed=$PLUGIN_ROOT/test/fixtures/window-clients-closed.json
+window_clients_close_refused=$PLUGIN_ROOT/test/fixtures/window-clients-close-refused.json
+window_clients_address_reused=$PLUGIN_ROOT/test/fixtures/window-clients-address-reused.json
+window_clients_address_reused_closed=$PLUGIN_ROOT/test/fixtures/window-clients-address-reused-closed.json
 window_clients_misdirected=$PLUGIN_ROOT/test/fixtures/window-clients-misdirected.json
-window_clients_restored=$PLUGIN_ROOT/test/fixtures/window-clients-restored.json
 window_active=$PLUGIN_ROOT/test/fixtures/window-active.json
 window_workspace=$PLUGIN_ROOT/test/fixtures/window-workspace.json
 window_monitors=$PLUGIN_ROOT/test/fixtures/window-monitors.json
@@ -414,7 +417,8 @@ window_result=$(
     XDG_STATE_HOME="$window_multi_dir" \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
-    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$multi_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -428,11 +432,12 @@ jq -e '.status == "restored" and .expected == 2 and .restored == 2
   && jq -e '.active == false and .status == "restored"
     and .originalActiveMonitor == "DP-2" and .workspaceRemoved == true' \
     "$window_multi_dir/omarchy-kids/windows.json" >/dev/null \
-  || fail "window-session helper does not evacuate Kids-launched windows"
-rg -q 'workspace = "name:work".*address:0xccc' "$multi_log" \
-  && rg -q 'workspace = "name:work".*address:0xddd' "$multi_log" \
-  && ! rg -Fq 'address:0xeee' "$multi_log" \
-  || fail "window-session helper evacuates the wrong post-entry windows"
+  || fail "window-session helper does not close Kids-launched windows"
+rg -q 'hl\.dsp\.window\.close.*address:0xccc' "$multi_log" \
+  && rg -q 'hl\.dsp\.window\.close.*address:0xddd' "$multi_log" \
+  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd)' "$multi_log" \
+  && ! rg -q 'hl\.dsp\.window\.close.*address:0x(aaa|bbb|eee)' "$multi_log" \
+  || fail "window-session helper closes the wrong post-entry windows"
 monitor_focus_line=$(rg -nF 'hl.dsp.focus({ monitor = "DP-2" })' "$multi_log" \
   | tail -1 | cut -d: -f1)
 workspace_focus_line=$(rg -nF 'hl.dsp.focus({ workspace = "name:work" })' "$multi_log" \
@@ -457,7 +462,8 @@ if window_result=$(
     XDG_STATE_HOME="$window_residual_dir" \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
-    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$residual_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -471,9 +477,8 @@ jq -e '.status == "restore-failed" and .workspaceRemoved == false
   and .evacuated == 2 and .failed > 0' <<< "$window_result" >/dev/null \
   && jq -e '.active == true and .status == "restore-failed"' \
     "$window_residual_dir/omarchy-kids/windows.json" >/dev/null \
-  && rg -q 'workspace = "name:omarchy-kids".*address:0xccc' "$residual_log" \
-  && rg -q 'workspace = "name:omarchy-kids".*address:0xddd' "$residual_log" \
-  || fail "window-session helper does not compensate a failed disappearance check"
+  && ! rg -q 'hl\.dsp\.window\.move.*address:0x(ccc|ddd)' "$residual_log" \
+  || fail "window-session helper does not retain a failed workspace disappearance check"
 
 window_misdirected_dir=$(mktemp -d)
 misdirected_log=$window_misdirected_dir/hyprctl.log
@@ -492,6 +497,7 @@ if window_result=$(
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_misdirected" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$misdirected_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -505,6 +511,76 @@ jq -e '.status == "restore-failed" and .kidsRemaining == 0
   && jq -e '.active == true and .status == "restore-failed"' \
     "$window_misdirected_dir/omarchy-kids/windows.json" >/dev/null \
   || fail "window-session helper does not verify final workspace and pin state"
+
+window_refusal_dir=$(mktemp -d)
+refusal_log=$window_refusal_dir/hyprctl.log
+refusal_marker=$window_refusal_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_refusal_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$refusal_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_refusal_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_close_refused" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$refusal_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$refusal_log" \
+    OMARCHY_KIDS_CLOSE_ATTEMPTS=1 \
+    OMARCHY_KIDS_CLOSE_INTERVAL=0 \
+    "$WINDOW_SESSION" exit
+); then
+  fail "window-session helper accepts a refused Kids-app close"
+fi
+jq -e '.status == "restore-failed" and .evacuated == 1
+  and .kidsRemaining == 2 and .workspaceRemoved == false and .failed > 0' \
+  <<< "$window_result" >/dev/null \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_refusal_dir/omarchy-kids/windows.json" >/dev/null \
+  && ! rg -q 'workspace = "1".*address:0xaaa' "$refusal_log" \
+  && ! rg -q 'workspace = "name:work".*address:0xbbb' "$refusal_log" \
+  && tail -n 1 "$refusal_log" | rg -Fq 'workspace = "name:omarchy-kids"' \
+  || fail "window-session helper reveals parent windows after a refused close"
+
+window_reused_dir=$(mktemp -d)
+reused_log=$window_reused_dir/hyprctl.log
+reused_marker=$window_reused_dir/client-query.marker
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_reused_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$reused_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+window_result=$(
+  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_reused_dir" \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_address_reused" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_address_reused_closed" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=1 \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$reused_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$reused_log" \
+    "$WINDOW_SESSION" exit
+)
+jq -e '.status == "restored" and .expected == 2 and .live == 1
+  and .missing == 1 and .restored == 1 and .evacuated == 1
+  and .kidsRemaining == 0 and .workspaceRemoved == true' \
+  <<< "$window_result" >/dev/null \
+  && rg -q 'hl\.dsp\.window\.close.*address:0xaaa' "$reused_log" \
+  && ! rg -q 'workspace = "1".*address:0xaaa' "$reused_log" \
+  || fail "window-session helper mistakes a recycled address for a saved parent window"
 
 window_legacy_dir=$(mktemp -d)
 legacy_log=$window_legacy_dir/hyprctl.log
@@ -620,7 +696,8 @@ window_result=$(
     OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
-    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_restored" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_closed" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
     OMARCHY_KIDS_TEST_CLIENTS_MARKER="$cleanup_marker" \
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
@@ -633,6 +710,44 @@ jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null 
     "$window_cleanup_dir/omarchy-kids/windows.json" >/dev/null \
   || fail "detached lifecycle cleanup does not order verified exit before shortcut release"
 
+window_cleanup_refusal_dir=$(mktemp -d)
+cleanup_refusal_log=$window_cleanup_refusal_dir/hyprctl.log
+cleanup_refusal_marker=$window_cleanup_refusal_dir/client-query.marker
+cleanup_refusal_runtime=$window_cleanup_refusal_dir/runtime
+mkdir -p "$cleanup_refusal_runtime/omarchy-kids"
+printf 'version=1\n' > "$cleanup_refusal_runtime/omarchy-kids/shortcut-policy.active"
+HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  XDG_STATE_HOME="$window_cleanup_refusal_dir" \
+  OMARCHY_KIDS_HYPRCTL="$window_mock" \
+  OMARCHY_KIDS_TEST_CLIENTS="$window_clients" \
+  OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+  OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+  OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_refusal_log" \
+  "$WINDOW_SESSION" enter >/dev/null
+if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+    XDG_STATE_HOME="$window_cleanup_refusal_dir" \
+    XDG_RUNTIME_DIR="$cleanup_refusal_runtime" \
+    OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
+    OMARCHY_KIDS_CLEANUP_RETRY_SECONDS=0 \
+    OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS=3 \
+    OMARCHY_KIDS_HYPRCTL="$window_mock" \
+    OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
+    OMARCHY_KIDS_TEST_POST_CLIENTS="$window_clients_close_refused" \
+    OMARCHY_KIDS_TEST_EXPECT_CLOSE_COUNT=2 \
+    OMARCHY_KIDS_TEST_CLIENTS_MARKER="$cleanup_refusal_marker" \
+    OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
+    OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
+    OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_refusal_log" \
+    OMARCHY_KIDS_CLOSE_ATTEMPTS=1 \
+    OMARCHY_KIDS_CLOSE_INTERVAL=0 \
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"; then
+  fail "detached lifecycle cleanup accepts a refused Kids-app close"
+fi
+[[ -f $cleanup_refusal_runtime/omarchy-kids/shortcut-policy.active ]] \
+  && jq -e '.active == true and .status == "restore-failed"' \
+    "$window_cleanup_refusal_dir/omarchy-kids/windows.json" >/dev/null \
+  || fail "detached lifecycle cleanup releases restrictions after a refused close"
+
 window_dirty_inactive_dir=$(mktemp -d)
 dirty_runtime=$window_dirty_inactive_dir/runtime
 mkdir -p "$dirty_runtime/omarchy-kids"
@@ -642,6 +757,7 @@ if HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_RUNTIME_DIR="$dirty_runtime" \
     OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
     OMARCHY_KIDS_CLEANUP_RETRY_SECONDS=0 \
+    OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS=3 \
     OMARCHY_KIDS_HYPRCTL="$window_mock" \
     OMARCHY_KIDS_TEST_CLIENTS="$window_clients_kids" \
     OMARCHY_KIDS_TEST_WORKSPACES="$window_workspaces_kids" \
@@ -659,8 +775,12 @@ rg -q 'readonly property bool kidsModeActive:' "$PLUGIN_ROOT/Menu.qml" \
   && rg -q 'Number\(result\.kidsRemaining \|\| 0\) === 0' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'windowLaunchGuardPending\(\)' "$PLUGIN_ROOT/Service.qml" \
   || fail "the menu lifecycle does not gate launches and enforce cleanup verification"
-rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_dir" "$window_stale_dir" "$window_hotplug_dir" \
-  "$window_legacy_dir" "$window_misdirected_dir" \
+rg -q 'MAX_ATTEMPTS=.*:-0' "$LIFECYCLE_CLEANUP" \
+  && rg -q 'while \(\(MAX_ATTEMPTS == 0' "$LIFECYCLE_CLEANUP" \
+  || fail "detached lifecycle cleanup is not durable after a refused close"
+rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cleanup_dir" \
+  "$window_stale_dir" "$window_hotplug_dir" "$window_legacy_dir" "$window_refusal_dir" \
+  "$window_reused_dir" "$window_misdirected_dir" \
   "$window_residual_dir" "$window_multi_dir" "$window_missing_dir" "$window_test_dir"
 
 shortcut_test_dir=$(mktemp -d)

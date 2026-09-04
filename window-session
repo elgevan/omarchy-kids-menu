@@ -72,6 +72,13 @@ move_window() {
     "hl.dsp.window.move({ workspace = $workspace_arg, follow = false, window = $window_arg })"
 }
 
+close_window() {
+  local window_arg
+  window_arg=$(lua_string "address:$1")
+  "$HYPRCTL_BIN" --quiet dispatch \
+    "hl.dsp.window.close({ window = $window_arg })"
+}
+
 focus_workspace() {
   local workspace_arg
   workspace_arg=$(lua_string "$1")
@@ -102,6 +109,21 @@ address_in_file() {
   local address=$1 clients_file=$2
   jq -e --arg address "$address" 'any(.[]; .address == $address)' \
     "$clients_file" >/dev/null
+}
+
+saved_window_in_file() {
+  local saved_window=$1 clients_file=$2
+  jq -e --argjson saved "$saved_window" '
+    def saved_matches($saved; $client):
+      $client.address == $saved.address
+      and (($saved.pid // 0) == 0
+        or ($client.pid // 0) == ($saved.pid // 0))
+      and (($saved.initialClass // "") == ""
+        or ($client.initialClass // $client.class // "") == $saved.initialClass)
+      and (($saved.initialTitle // "") == ""
+        or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+    any(.[]; saved_matches($saved; .))
+  ' "$clients_file" >/dev/null
 }
 
 session_for_instance() {
@@ -205,9 +227,12 @@ enter_session() {
           | select((.workspace.name // "") != $parentWorkspace)
           | {
               address,
+              pid: (.pid // 0),
               workspace: (.workspace.name // "1"),
               class: (.class // ""),
               title: (.title // ""),
+              initialClass: (.initialClass // .class // ""),
+              initialTitle: (.initialTitle // .title // ""),
               pinned: (.pinned // false),
               floating: (.floating // false),
               fullscreen: (.fullscreen // 0)
@@ -256,7 +281,9 @@ enter_session() {
 
 exit_session() {
   local instance expected=0 live=0 missing=0 restored=0 failed=0
-  local evacuated=0 evacuation_expected=0 kids_remaining=0 compensation_failed=0
+  local evacuated=0 evacuation_expected=0 close_remaining=0 kids_remaining=0
+  local post_entry_kids_remaining=0
+  local compensation_failed=0
   local original_monitor_available=false
   instance=$(current_instance)
 
@@ -336,17 +363,17 @@ exit_session() {
     return
   fi
 
-  local clients_file moved_file evacuated_file state_tmp monitors_file
+  local clients_file moved_file close_targets_file state_tmp monitors_file
   local active_workspace_file post_clients_file workspaces_file
   clients_file=$(mktemp "$STATE_DIR/clients.XXXXXX")
   moved_file=$(mktemp "$STATE_DIR/moved.XXXXXX")
-  evacuated_file=$(mktemp "$STATE_DIR/evacuated.XXXXXX")
+  close_targets_file=$(mktemp "$STATE_DIR/close-targets.XXXXXX")
   state_tmp=$(mktemp "$STATE_DIR/windows.XXXXXX")
   monitors_file=$(mktemp "$STATE_DIR/monitors.XXXXXX")
   active_workspace_file=$(mktemp "$STATE_DIR/active-workspace.XXXXXX")
   post_clients_file=$(mktemp "$STATE_DIR/post-clients.XXXXXX")
   workspaces_file=$(mktemp "$STATE_DIR/workspaces.XXXXXX")
-  trap 'rm -f -- "$clients_file" "$moved_file" "$evacuated_file" "$state_tmp" "$monitors_file" "$active_workspace_file" "$post_clients_file" "$workspaces_file"' RETURN
+  trap 'rm -f -- "$clients_file" "$moved_file" "$close_targets_file" "$state_tmp" "$monitors_file" "$active_workspace_file" "$post_clients_file" "$workspaces_file"' RETURN
 
   if ! "$HYPRCTL_BIN" -j clients > "$clients_file" \
       || ! jq -e 'type == "array"' "$clients_file" >/dev/null; then
@@ -354,82 +381,149 @@ exit_session() {
     return 1
   fi
 
-  live=$(jq --slurpfile clients "$clients_file" \
-    '[.windows[] as $saved | $clients[0][] | select(.address == $saved.address)] | length' \
-    "$STATE_FILE")
+  live=$(jq --slurpfile clients "$clients_file" '
+    def saved_matches($saved; $client):
+      $client.address == $saved.address
+      and (($saved.pid // 0) == 0
+        or ($client.pid // 0) == ($saved.pid // 0))
+      and (($saved.initialClass // "") == ""
+        or ($client.initialClass // $client.class // "") == $saved.initialClass)
+      and (($saved.initialTitle // "") == ""
+        or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+    [.windows[] as $saved | $clients[0][] | select(saved_matches($saved; .))]
+    | length' "$STATE_FILE")
   missing=$((expected - live))
 
-  local row address workspace pinned selector
-  local original_workspace original_window original_monitor
+  local row saved_window address workspace pinned selector
+  local original_workspace original_window original_window_saved original_monitor
   original_workspace=$(jq -r '.originalActiveWorkspace // "1"' "$STATE_FILE")
   original_window=$(jq -r '.originalActiveWindow // ""' "$STATE_FILE")
+  original_window_saved=$(jq -c --arg address "$original_window" \
+    '.windows[] | select(.address == $address)' "$STATE_FILE" | head -1)
   original_monitor=$(jq -r '.originalActiveMonitor // ""' "$STATE_FILE")
   selector=$(workspace_selector "$original_workspace")
-
-  while IFS= read -r row; do
-    address=$(base64 -d <<< "$row" | jq -r '.address')
-    workspace=$(base64 -d <<< "$row" | jq -r '.workspace // "1"')
-    pinned=$(base64 -d <<< "$row" | jq -r '.pinned // false')
-    if [[ ! $address =~ ^0x[0-9a-fA-F]+$ ]]; then
-      failed=$((failed + 1))
-      continue
-    fi
-    address_in_file "$address" "$clients_file" || continue
-
-    if ! move_window "$(workspace_selector "$workspace")" "$address"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    printf '%s\t%s\n' "$address" "$pinned" >> "$moved_file"
-
-    if [[ $pinned == true ]] && ! set_window_pin on "$address"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    restored=$((restored + 1))
-  done < <(jq -r '.windows[] | @base64' "$STATE_FILE")
 
   evacuation_expected=$(jq \
     --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
     --slurpfile state "$STATE_FILE" \
-    '[.[]
+    'def saved_matches($saved; $client):
+      $client.address == $saved.address
+      and (($saved.pid // 0) == 0
+        or ($client.pid // 0) == ($saved.pid // 0))
+      and (($saved.initialClass // "") == ""
+        or ($client.initialClass // $client.class // "") == $saved.initialClass)
+      and (($saved.initialTitle // "") == ""
+        or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+    [.[] as $client
+      | $client
       | select((.mapped // true) == true)
       | select((.workspace.name // "") == $kidsWorkspace)
-      | .address as $address
-      | select(($state[0].windows | map(.address) | index($address)) == null)]
+      | select(any($state[0].windows[]; saved_matches(.; $client)) | not)]
     | length' "$clients_file")
 
   while IFS= read -r row; do
     address=$(base64 -d <<< "$row" | jq -r '.address // ""')
-    pinned=$(base64 -d <<< "$row" | jq -r '.pinned // false')
+    printf '%s\n' "$address" >> "$close_targets_file"
     if [[ ! $address =~ ^0x[0-9a-fA-F]+$ ]]; then
       failed=$((failed + 1))
       continue
     fi
-    if [[ $pinned == true ]] && ! set_window_pin off "$address"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    if ! move_window "$selector" "$address"; then
-      failed=$((failed + 1))
-      if [[ $pinned == true ]]; then set_window_pin on "$address" || true; fi
-      continue
-    fi
-    printf '%s\t%s\n' "$address" "$pinned" >> "$evacuated_file"
-    if [[ $pinned == true ]] && ! set_window_pin on "$address"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    evacuated=$((evacuated + 1))
+    # A normal close lets the client save or present a confirmation dialog. Its
+    # disappearance below, rather than the dispatcher status, is authoritative.
+    close_window "$address" || true
   done < <(jq -r \
     --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
     --slurpfile state "$STATE_FILE" \
-    '.[]
+    'def saved_matches($saved; $client):
+      $client.address == $saved.address
+      and (($saved.pid // 0) == 0
+        or ($client.pid // 0) == ($saved.pid // 0))
+      and (($saved.initialClass // "") == ""
+        or ($client.initialClass // $client.class // "") == $saved.initialClass)
+      and (($saved.initialTitle // "") == ""
+        or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+    .[] as $client
+      | $client
       | select((.mapped // true) == true)
       | select((.workspace.name // "") == $kidsWorkspace)
-      | .address as $address
-      | select(($state[0].windows | map(.address) | index($address)) == null)
+      | select(any($state[0].windows[]; saved_matches(.; $client)) | not)
       | @base64' "$clients_file")
+
+  close_remaining=$evacuation_expected
+  if ((failed == 0 && evacuation_expected > 0)); then
+    local close_check_attempt close_check_complete=false
+    local close_check_attempts=${OMARCHY_KIDS_CLOSE_ATTEMPTS:-20}
+    local close_check_interval=${OMARCHY_KIDS_CLOSE_INTERVAL:-0.1}
+    for ((close_check_attempt = 1; close_check_attempt <= close_check_attempts; close_check_attempt++)); do
+      if ! "$HYPRCTL_BIN" -j clients > "$post_clients_file" \
+          || ! jq -e 'type == "array"' "$post_clients_file" >/dev/null; then
+        failed=$((failed + 1))
+        break
+      fi
+
+      close_remaining=0
+      while IFS= read -r address; do
+        [[ -n $address ]] || continue
+        if address_in_file "$address" "$post_clients_file"; then
+          close_remaining=$((close_remaining + 1))
+        fi
+      done < "$close_targets_file"
+      evacuated=$((evacuation_expected - close_remaining))
+      post_entry_kids_remaining=$(jq \
+        --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+        --slurpfile state "$STATE_FILE" \
+        'def saved_matches($saved; $client):
+          $client.address == $saved.address
+          and (($saved.pid // 0) == 0
+            or ($client.pid // 0) == ($saved.pid // 0))
+          and (($saved.initialClass // "") == ""
+            or ($client.initialClass // $client.class // "") == $saved.initialClass)
+          and (($saved.initialTitle // "") == ""
+            or ($client.initialTitle // $client.title // "") == $saved.initialTitle);
+        [.[] as $client
+          | $client
+          | select((.mapped // true) == true)
+          | select((.workspace.name // "") == $kidsWorkspace)
+          | select(any($state[0].windows[]; saved_matches(.; $client)) | not)]
+        | length' "$post_clients_file")
+      if ((close_remaining == 0 && post_entry_kids_remaining == 0)); then
+        close_check_complete=true
+        break
+      fi
+      sleep "$close_check_interval"
+    done
+    if [[ $close_check_complete != true ]]; then
+      failed=$((failed + 1))
+    fi
+  fi
+
+  # Do not reveal the parent's windows while a Kids-launched client is still
+  # handling (or refusing) its graceful close request.
+  if ((failed == 0)); then
+    while IFS= read -r row; do
+      saved_window=$(base64 -d <<< "$row")
+      address=$(jq -r '.address' <<< "$saved_window")
+      workspace=$(jq -r '.workspace // "1"' <<< "$saved_window")
+      pinned=$(jq -r '.pinned // false' <<< "$saved_window")
+      if [[ ! $address =~ ^0x[0-9a-fA-F]+$ ]]; then
+        failed=$((failed + 1))
+        continue
+      fi
+      saved_window_in_file "$saved_window" "$clients_file" || continue
+
+      if ! move_window "$(workspace_selector "$workspace")" "$address"; then
+        failed=$((failed + 1))
+        continue
+      fi
+      printf '%s\t%s\n' "$address" "$pinned" >> "$moved_file"
+
+      if [[ $pinned == true ]] && ! set_window_pin on "$address"; then
+        failed=$((failed + 1))
+        continue
+      fi
+      restored=$((restored + 1))
+    done < <(jq -r '.windows[] | @base64' "$STATE_FILE")
+  fi
 
   if ((failed == 0)) && [[ -n $original_monitor ]]; then
     if ! "$HYPRCTL_BIN" -j monitors > "$monitors_file" \
@@ -448,7 +542,8 @@ exit_session() {
     failed=$((failed + 1))
   fi
   if ((failed == 0)) && [[ $original_window =~ ^0x[0-9a-fA-F]+$ ]] \
-      && address_in_file "$original_window" "$clients_file" \
+      && [[ -n $original_window_saved ]] \
+      && saved_window_in_file "$original_window_saved" "$clients_file" \
       && ! focus_window "$original_window"; then
     failed=$((failed + 1))
   fi
@@ -481,15 +576,24 @@ exit_session() {
       fi
     fi
   else
-    kids_remaining=$evacuation_expected
+    if jq -e 'type == "array"' "$post_clients_file" >/dev/null 2>&1; then
+      kids_remaining=$(jq --arg kidsWorkspace "$KIDS_WORKSPACE_NAME" \
+        '[.[]
+          | select((.mapped // true) == true)
+          | select((.workspace.name // "") == $kidsWorkspace)]
+        | length' "$post_clients_file")
+    else
+      kids_remaining=$close_remaining
+    fi
   fi
 
   if ((failed == 0)); then
     while IFS= read -r row; do
-      address=$(base64 -d <<< "$row" | jq -r '.address')
-      workspace=$(base64 -d <<< "$row" | jq -r '.workspace // "1"')
-      pinned=$(base64 -d <<< "$row" | jq -r '.pinned // false')
-      address_in_file "$address" "$post_clients_file" || continue
+      saved_window=$(base64 -d <<< "$row")
+      address=$(jq -r '.address' <<< "$saved_window")
+      workspace=$(jq -r '.workspace // "1"' <<< "$saved_window")
+      pinned=$(jq -r '.pinned // false' <<< "$saved_window")
+      saved_window_in_file "$saved_window" "$post_clients_file" || continue
       if ! jq -e --arg address "$address" --arg workspace "$workspace" \
           --argjson pinned "$pinned" \
           'any(.[]; .address == $address
@@ -500,18 +604,12 @@ exit_session() {
       fi
     done < <(jq -r '.windows[] | @base64' "$STATE_FILE")
 
-    while IFS=$'\t' read -r address pinned; do
+    while IFS= read -r address; do
       [[ -n $address ]] || continue
-      address_in_file "$address" "$post_clients_file" || continue
-      if ! jq -e --arg address "$address" --arg workspace "$original_workspace" \
-          --argjson pinned "$pinned" \
-          'any(.[]; .address == $address
-            and (.workspace.name // "") == $workspace
-            and (.pinned // false) == $pinned)' \
-          "$post_clients_file" >/dev/null; then
+      if address_in_file "$address" "$post_clients_file"; then
         failed=$((failed + 1))
       fi
-    done < "$evacuated_file"
+    done < "$close_targets_file"
   fi
 
   if ((failed == 0)); then
@@ -542,18 +640,6 @@ exit_session() {
         compensation_failed=$((compensation_failed + 1))
       fi
     done < "$moved_file"
-    while IFS=$'\t' read -r address pinned; do
-      [[ -n $address ]] || continue
-      if [[ $pinned == true ]] && ! set_window_pin off "$address"; then
-        compensation_failed=$((compensation_failed + 1))
-      fi
-      if ! move_window "$KIDS_WORKSPACE" "$address"; then
-        compensation_failed=$((compensation_failed + 1))
-      fi
-      if [[ $pinned == true ]] && ! set_window_pin on "$address"; then
-        compensation_failed=$((compensation_failed + 1))
-      fi
-    done < "$evacuated_file"
     if ! focus_workspace "$KIDS_WORKSPACE"; then
       compensation_failed=$((compensation_failed + 1))
     fi
@@ -579,7 +665,7 @@ exit_session() {
       | .kidsRemaining = 0 | .workspaceRemoved = true | .endedAt = $endedAt' \
     "$STATE_FILE" > "$state_tmp"
   mv -- "$state_tmp" "$STATE_FILE"
-  rm -f -- "$clients_file" "$moved_file" "$evacuated_file" "$monitors_file" \
+  rm -f -- "$clients_file" "$moved_file" "$close_targets_file" "$monitors_file" \
     "$active_workspace_file" "$post_clients_file" "$workspaces_file"
   trap - RETURN
   emit exit restored 0 "$restored" 0 "$expected" "$live" "$missing" 0 \

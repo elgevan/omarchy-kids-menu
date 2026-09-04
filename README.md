@@ -10,7 +10,7 @@ When Kids Mode starts, it:
 - Filters shortcuts that would open unapproved apps or settings.
 - Turns on Do Not Disturb.
 
-Exiting Kids Mode requires the account password or a configured fingerprint. The parent's apps, workspaces, shortcuts, and notification settings are then restored.
+Exiting Kids Mode requires the account password or a configured fingerprint. Apps opened during Kids Mode receive a normal close request, then the parent's apps, workspaces, shortcuts, and notification settings are restored. If an app needs confirmation before closing, Kids Mode stays active so the prompt can be handled safely.
 
 ## Requirements
 
