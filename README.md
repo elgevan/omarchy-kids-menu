@@ -40,13 +40,15 @@ Exiting Kids Mode restores the original windows, workspaces, shortcuts, menu, an
 
 The plugin stores its allowlist and mode state under `~/.config/omarchy-kids/`, runtime state under `${XDG_STATE_HOME:-~/.local/state}/omarchy-kids/`, and the separate browser profile under `~/.local/share/omarchy-kids/chromium/`.
 
+If shortcut restoration exhausts its automatic retries, the exact failure is retained in `~/.local/state/omarchy-kids/shortcut-restore.json` and marked resolved after a later successful recovery.
+
 ## Use
 
 1. Open the Kids Mode manager.
 2. Select the apps the child can use.
 3. Click **Start Kids Mode**.
 
-The normal Omarchy button now opens the approved app list. The default selections are Google Chrome, Chromium, Omawrite, and Omacalc when those apps are installed.
+The top-left Omarchy button opens the normal root menu while Kids Mode is inactive and the approved app list while Kids Mode is active. Like the stock Omarchy button, right-clicking it opens the terminal while Kids Mode is inactive; the terminal action is suppressed while Kids Mode is active. The default app selections are Google Chrome, Chromium, Omawrite, and Omacalc when those apps are installed.
 
 While Kids Mode is active, the app selection is locked. Open the manager and click **Exit Kids Mode** to return to the parent desktop. Omarchy will lock the screen and complete the switch after a successful password or fingerprint check.
 

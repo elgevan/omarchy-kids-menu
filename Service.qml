@@ -637,6 +637,9 @@ Item {
         ? "Could not filter keyboard shortcuts"
         : "Could not restore keyboard shortcuts"
       if (result && result.error) root.shortcutPolicyError = String(result.error)
+      console.warn("omarchy-kids: shortcut policy " + action
+        + " failed with exit code " + exitCode + ": "
+        + root.shortcutPolicyError + "; output: " + String(output || "").trim())
       if (action === "enter") {
         root.shortcutPolicyApplied = false
         if (root.modePhase === "entering")

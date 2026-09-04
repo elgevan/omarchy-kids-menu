@@ -29,7 +29,7 @@ rg -q '^## Remove$' "$PLUGIN_ROOT/README.md" \
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.omarchy-kids" and
-  .version == "0.14.0" and
+  .version == "0.14.3" and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -98,6 +98,21 @@ assert.equal(state.parseEnabled(JSON.stringify({version: 1, enabled: true})), tr
 assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
 assert.deepEqual(JSON.parse(state.stateText()), {version: 1, enabled: false})
+NODE
+
+node - "$PLUGIN_ROOT/BarActions.js" <<'NODE'
+const assert = require("node:assert/strict")
+const actions = require(process.argv[2])
+
+const pluginCommand = route =>
+  `omarchy-shell shell toggle io.github.elgevan.omarchy-kids '{"menu":"${route}"}'`
+
+assert.equal(actions.menuRoute(false), "root")
+assert.equal(actions.menuRoute(true), "apps")
+assert.equal(actions.commandFor(false, false), pluginCommand("root"))
+assert.equal(actions.commandFor(true, false), pluginCommand("apps"))
+assert.equal(actions.commandFor(false, true), "xdg-terminal-exec")
+assert.equal(actions.commandFor(true, true), "")
 NODE
 
 node - "$PLUGIN_ROOT/ShellIntegration.js" <<'NODE'
@@ -801,6 +816,7 @@ rm -rf -- "$window_dirty_inactive_dir" "$window_cleanup_refusal_dir" "$window_cl
 
 shortcut_test_dir=$(mktemp -d)
 shortcut_log=$shortcut_test_dir/hyprctl.log
+shortcut_state_dir=$shortcut_test_dir/state
 shortcut_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.json
 shortcut_mock=$PLUGIN_ROOT/test/hyprctl-mock
 keybindings_fixture=$PLUGIN_ROOT/test/fixtures/stock-bindings.txt
@@ -809,7 +825,8 @@ universal_fixture=$PLUGIN_ROOT/test/fixtures/universal-binding.json
 kids_submap_fixture=$PLUGIN_ROOT/test/fixtures/kids-submap-binding.json
 
 shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
@@ -836,7 +853,8 @@ rg -Fq 'hl.define_submap("omarchy-kids", function()' "$shortcut_log" \
 
 : > "$shortcut_log"
 shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
@@ -855,7 +873,8 @@ jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/nul
 
 : > "$shortcut_log"
 shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
@@ -866,10 +885,94 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
   && [[ $(rg -c '^reload$' "$shortcut_log") == 1 ]] \
   && [[ ! -e $shortcut_test_dir/runtime/omarchy-kids/shortcut-policy.active ]] \
   || fail "shortcut policy does not restore Hyprland state on exit"
+reset_before_line=$(rg -nF 'hl.dispatch(hl.dsp.submap("reset"))' "$shortcut_log" \
+  | head -1 | cut -d: -f1)
+reload_line=$(rg -n '^reload$' "$shortcut_log" | head -1 | cut -d: -f1)
+reset_after_line=$(rg -nF 'hl.dispatch(hl.dsp.submap("reset"))' "$shortcut_log" \
+  | tail -1 | cut -d: -f1)
+[[ $reset_before_line -lt $reload_line && $reload_line -lt $reset_after_line ]] \
+  || fail "shortcut policy does not leave the transient submap before reloading"
+
+: > "$shortcut_log"
+shortcut_result=$(
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/transient-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter true true true
+)
+jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy cannot prepare the transient restore test"
+: > "$shortcut_log"
+shortcut_result=$(
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/transient-runtime" \
+    OMARCHY_KIDS_SHORTCUT_RESTORE_ATTEMPTS=3 \
+    OMARCHY_KIDS_SHORTCUT_RESTORE_RETRY_SECONDS=0 \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    OMARCHY_KIDS_TEST_FAIL_RESET_COUNT=2 \
+    "$SHORTCUT_POLICY" exit
+)
+jq -e '.action == "exit" and .applied == false and .restored == true' \
+  <<< "$shortcut_result" >/dev/null \
+  && [[ $(rg -c '^reload$' "$shortcut_log") == 2 ]] \
+  && [[ ! -e $shortcut_test_dir/transient-runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy does not recover from a transient restore failure"
+
+: > "$shortcut_log"
+shortcut_result=$(
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/diagnostic-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" enter true true true
+)
+jq -e '.action == "enter" and .applied == true' <<< "$shortcut_result" >/dev/null \
+  || fail "shortcut policy cannot prepare the restore diagnostic test"
+: > "$shortcut_log"
+if shortcut_result=$(
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/diagnostic-runtime" \
+    OMARCHY_KIDS_SHORTCUT_RESTORE_ATTEMPTS=3 \
+    OMARCHY_KIDS_SHORTCUT_RESTORE_RETRY_SECONDS=0 \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    OMARCHY_KIDS_TEST_FAIL_RESET=true \
+    "$SHORTCUT_POLICY" exit
+); then
+  fail "shortcut policy accepts an exhausted restore retry"
+fi
+jq -e '.action == "exit" and .applied == true and .restored == false
+  and (.error | contains("failed after 3 attempts"))' <<< "$shortcut_result" >/dev/null \
+  && jq -e '.version == 1 and .action == "exit" and .attempts == 3
+    and .resolved == false and (.error | contains("mock submap reset failure"))' \
+    "$shortcut_state_dir/omarchy-kids/shortcut-restore.json" >/dev/null \
+  && [[ -f $shortcut_test_dir/diagnostic-runtime/omarchy-kids/shortcut-policy.active ]] \
+  || fail "shortcut policy does not retain exact exhausted-restore diagnostics"
+shortcut_result=$(
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/diagnostic-runtime" \
+    OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
+    OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
+    OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
+    "$SHORTCUT_POLICY" exit
+)
+jq -e '.action == "exit" and .applied == false and .restored == true' \
+  <<< "$shortcut_result" >/dev/null \
+  && jq -e '.resolved == true and .resolvedBy == "exit"
+    and (.resolvedAt | type == "string")' \
+    "$shortcut_state_dir/omarchy-kids/shortcut-restore.json" >/dev/null \
+  || fail "shortcut policy does not mark a retained restore failure as recovered"
 
 : > "$shortcut_log"
 if shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/recovered-runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/recovered-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
@@ -889,7 +992,8 @@ jq -e '.action == "enter" and .applied == false
 
 : > "$shortcut_log"
 if shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_KEYBINDINGS="$keybindings_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
@@ -907,7 +1011,8 @@ jq -e '.action == "enter" and .applied == false
   && [[ -f $shortcut_test_dir/uncertain-runtime/omarchy-kids/shortcut-policy.active ]] \
   || fail "shortcut policy drops ownership after unverified recovery"
 shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/uncertain-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_TEST_BINDS="$shortcut_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
@@ -919,7 +1024,8 @@ jq -e '.action == "exit" and .applied == false and .restored == true' \
   || fail "shortcut policy cannot recover retained ownership on retry"
 
 if shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/universal-runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/universal-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_TEST_BINDS="$universal_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
@@ -933,7 +1039,8 @@ jq -e '.action == "enter" and .applied == false
   || fail "shortcut policy does not explain a universal-binding refusal"
 
 if shortcut_result=$(
-  XDG_RUNTIME_DIR="$shortcut_test_dir/collision-runtime" \
+  XDG_STATE_HOME="$shortcut_state_dir" \
+    XDG_RUNTIME_DIR="$shortcut_test_dir/collision-runtime" \
     OMARCHY_KIDS_HYPRCTL="$shortcut_mock" \
     OMARCHY_KIDS_TEST_BINDS="$kids_submap_fixture" \
     OMARCHY_KIDS_TEST_LOG="$shortcut_log" \
@@ -952,8 +1059,16 @@ if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' 
   fail "the plugin handles credentials directly or invokes a privileged helper"
 fi
 
-if rg -q 'xdg-terminal-exec' "$PLUGIN_ROOT/BarWidget.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
-  fail "a kids-mode bar control retains the terminal shortcut"
+rg -Fq 'import "BarActions.js" as BarActions' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -Fq 'root.kidsModeEnabled,' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -Fq 'buttonCode === Qt.RightButton' "$PLUGIN_ROOT/BarWidget.qml" \
+  && rg -Fq 'if (command.length > 0)' "$PLUGIN_ROOT/BarWidget.qml" \
+  || fail "the Omarchy bar button does not use mode-aware stock click routing"
+
+if rg -q 'xdg-terminal-exec' \
+    "$PLUGIN_ROOT/Menu.qml" "$PLUGIN_ROOT/ManagerWidget.qml" \
+    "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/kids-menu.jsonc"; then
+  fail "a non-stock Kids control exposes a terminal action"
 fi
 
 if rg -q 'https?://|omarchy-launch-webapp|spotify|youtube|khan' "$MENU"; then

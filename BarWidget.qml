@@ -1,11 +1,20 @@
 import QtQuick
 import qs.Ui
+import "BarActions.js" as BarActions
 
 // Preserve the normal Omarchy menu symbol while using this plugin's own
 // permanent ID. Service.qml moves this widget into the stock menu's bar slot.
 BarWidget {
   id: root
   moduleName: "io.github.elgevan.omarchy-kids"
+
+  readonly property var allowlistService: root.bar && root.bar.shell
+    && typeof root.bar.shell.serviceFor === "function"
+    ? root.bar.shell.serviceFor("io.github.elgevan.omarchy-kids")
+    : null
+  readonly property bool kidsModeEnabled: root.allowlistService
+    ? root.allowlistService.kidsModeEnabled === true
+    : false
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -19,8 +28,12 @@ BarWidget {
     horizontalMargin: 7.5
     tooltipText: "Omarchy menu"
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.LeftButton && root.bar)
-        root.bar.run("omarchy-shell shell toggle io.github.elgevan.omarchy-kids '{\"menu\":\"apps\"}'")
+      if (!root.bar) return
+      const command = BarActions.commandFor(
+        root.kidsModeEnabled,
+        buttonCode === Qt.RightButton
+      )
+      if (command.length > 0) root.bar.run(command)
     }
   }
 }

@@ -8,6 +8,10 @@ RUNTIME_ROOT=${XDG_RUNTIME_DIR:-/tmp/omarchy-kids-runtime-$UID}
 STATE_DIR=$RUNTIME_ROOT/omarchy-kids
 ACTIVE_MARKER=$STATE_DIR/shortcut-policy.active
 LOCK_FILE=$STATE_DIR/shortcut-policy.lock
+DIAGNOSTIC_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids
+RESTORE_DIAGNOSTIC=$DIAGNOSTIC_DIR/shortcut-restore.json
+RESTORE_ATTEMPTS=${OMARCHY_KIDS_SHORTCUT_RESTORE_ATTEMPTS:-5}
+RESTORE_RETRY_SECONDS=${OMARCHY_KIDS_SHORTCUT_RESTORE_RETRY_SECONDS:-0.2}
 
 usage() {
   echo "Usage: shortcut-policy enter <browser-allowed> <omawrite-allowed> <omacalc-allowed> | exit | status" >&2
@@ -27,18 +31,86 @@ json_result() {
       + (if $error == "" then {} else {error: $error} end)'
 }
 
+reset_submap() {
+  "$HYPRCTL_BIN" eval \
+    'hl.dispatch(hl.dsp.submap("reset")); assert(hl.get_current_submap() == "", "Hyprland submap did not reset")'
+}
+
+reload_bindings_once() {
+  local before_error="" reload_error="" after_error=""
+  local before_failed=false
+
+  # Leave the transient submap before reloading the configuration that defines
+  # the user's real bindings. Reloading while the dynamic submap is selected can
+  # leave Hyprland pointing at a definition that is being replaced.
+  if ! before_error=$(reset_submap 2>&1); then
+    before_failed=true
+  fi
+
+  if ! reload_error=$($HYPRCTL_BIN reload 2>&1); then
+    printf 'configuration reload failed: %s' "$reload_error"
+    if [[ $before_failed == true ]]; then
+      printf '; initial submap reset also failed: %s' "$before_error"
+    fi
+    return 1
+  fi
+
+  # Verify again after reload. This is authoritative: the marker is retained
+  # unless both the real configuration and the default submap are active.
+  if ! after_error=$(reset_submap 2>&1); then
+    printf 'submap reset failed after configuration reload: %s' "$after_error"
+    return 1
+  fi
+}
+
 reload_bindings() {
-  local output
-  if ! output=$($HYPRCTL_BIN reload 2>&1); then
-    printf '%s' "$output"
-    return 1
+  local attempt error=""
+  for ((attempt = 1; attempt <= RESTORE_ATTEMPTS; attempt++)); do
+    if error=$(reload_bindings_once); then
+      return 0
+    fi
+    if ((attempt < RESTORE_ATTEMPTS)); then
+      sleep "$RESTORE_RETRY_SECONDS"
+    fi
+  done
+
+  printf 'failed after %d attempts: %s' "$RESTORE_ATTEMPTS" "$error"
+  return 1
+}
+
+record_restore_failure() {
+  local action=$1 error=$2 diagnostic_tmp
+  mkdir -p -- "$DIAGNOSTIC_DIR" 2>/dev/null || return 0
+  chmod 700 "$DIAGNOSTIC_DIR" 2>/dev/null || true
+  diagnostic_tmp=$(mktemp "$DIAGNOSTIC_DIR/shortcut-restore.XXXXXX") || return 0
+  if jq -n \
+    --arg action "$action" \
+    --arg failedAt "$(date --iso-8601=seconds)" \
+    --arg error "$error" \
+    --argjson attempts "$RESTORE_ATTEMPTS" \
+    '{version: 1, action: $action, failedAt: $failedAt, attempts: $attempts,
+      error: $error, resolved: false}' >"$diagnostic_tmp" \
+      && mv -- "$diagnostic_tmp" "$RESTORE_DIAGNOSTIC"; then
+    return 0
   fi
-  if ! output=$($HYPRCTL_BIN eval \
-      'hl.dispatch(hl.dsp.submap("reset")); assert(hl.get_current_submap() == "", "Hyprland submap did not reset")' \
-      2>&1); then
-    printf '%s' "$output"
-    return 1
+  rm -f -- "$diagnostic_tmp"
+  return 0
+}
+
+mark_restore_recovered() {
+  local action=$1 diagnostic_tmp
+  [[ -f $RESTORE_DIAGNOSTIC ]] || return 0
+  diagnostic_tmp=$(mktemp "$DIAGNOSTIC_DIR/shortcut-restore.XXXXXX") || return 0
+  if jq \
+      --arg action "$action" \
+      --arg resolvedAt "$(date --iso-8601=seconds)" \
+      '.resolved = true | .resolvedBy = $action | .resolvedAt = $resolvedAt' \
+      "$RESTORE_DIAGNOSTIC" >"$diagnostic_tmp" \
+      && mv -- "$diagnostic_tmp" "$RESTORE_DIAGNOSTIC"; then
+    return 0
   fi
+  rm -f -- "$diagnostic_tmp"
+  return 0
 }
 
 is_boolean() {
@@ -47,6 +119,8 @@ is_boolean() {
 
 mkdir -p -- "$STATE_DIR"
 chmod 700 "$STATE_DIR"
+[[ $RESTORE_ATTEMPTS =~ ^[1-9][0-9]*$ ]] || RESTORE_ATTEMPTS=5
+[[ $RESTORE_RETRY_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || RESTORE_RETRY_SECONDS=0.2
 exec 9>"$LOCK_FILE"
 flock 9
 
@@ -68,10 +142,12 @@ case $action in
 
     if error=$(reload_bindings); then
       rm -f -- "$ACTIVE_MARKER"
+      mark_restore_recovered exit
       json_result exit false 0 true
       exit 0
     fi
 
+    record_restore_failure exit "$error"
     json_result exit true 0 false "Could not restore Hyprland bindings: $error"
     exit 1
     ;;
@@ -94,10 +170,12 @@ is_boolean "$omacalc_allowed" || usage
 # submap so a previous instance never accumulates bindings.
 if [[ -f $ACTIVE_MARKER ]]; then
   if ! error=$(reload_bindings); then
+    record_restore_failure pre-enter-reset "$error"
     json_result enter false 0 false "Could not reset the previous shortcut layer: $error"
     exit 1
   fi
   rm -f -- "$ACTIVE_MARKER"
+  mark_restore_recovered pre-enter-reset
 fi
 
 if ! bindings_json=$($HYPRCTL_BIN binds -j 2>&1); then
@@ -196,10 +274,12 @@ assert(hl.get_current_submap() == \"omarchy-kids\", \"Kids Mode submap did not a
 printf 'version=1\n' >"$ACTIVE_MARKER"
 if ! error=$($HYPRCTL_BIN eval "$lua_program" 2>&1); then
   restore_error=""
-  if reload_bindings >/dev/null 2>&1; then
+  if restore_error=$(reload_bindings); then
     rm -f -- "$ACTIVE_MARKER"
+    mark_restore_recovered activation-rollback
   else
-    restore_error="; automatic restore also failed"
+    record_restore_failure activation-rollback "$restore_error"
+    restore_error="; automatic restore also failed: $restore_error"
   fi
   json_result enter false "$changed" false \
     "Could not apply Kids Mode shortcuts: $error$restore_error"

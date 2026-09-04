@@ -14,11 +14,21 @@ case ${1:-} in
       echo "mock eval failure" >&2
       exit 1
     fi
+    if [[ ${2:-} == *'Hyprland submap did not reset'* ]]; then
+      reset_count=$(rg -c 'Hyprland submap did not reset' "$OMARCHY_KIDS_TEST_LOG")
+      if [[ ${OMARCHY_KIDS_TEST_FAIL_RESET:-false} == true \
+          || $reset_count -le ${OMARCHY_KIDS_TEST_FAIL_RESET_COUNT:-0} ]]; then
+        echo "mock submap reset failure" >&2
+        exit 1
+      fi
+    fi
     echo ok
     ;;
   reload)
     echo reload >>"$OMARCHY_KIDS_TEST_LOG"
-    if [[ ${OMARCHY_KIDS_TEST_FAIL_RELOAD:-false} == true ]]; then
+    reload_count=$(rg -c '^reload$' "$OMARCHY_KIDS_TEST_LOG")
+    if [[ ${OMARCHY_KIDS_TEST_FAIL_RELOAD:-false} == true \
+        || $reload_count -le ${OMARCHY_KIDS_TEST_FAIL_RELOAD_COUNT:-0} ]]; then
       echo "mock reload failure" >&2
       exit 1
     fi

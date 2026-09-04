@@ -400,9 +400,18 @@ wait_until "blocked stock route still shows Style" 15 screen_contains Style
 wtype -k Escape
 wait_until "blocked stock route closes" 15 layer_absent
 
-if rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)|xdg-terminal-exec' \
+if rg -q 'sourceAppLibrary\.remove|omarchy-(install|pkg|remove)' \
   "$installed/Menu.qml" "$installed/Service.qml" "$installed/BarWidget.qml" "$installed/ManagerWidget.qml" "$installed/kids-menu.jsonc"; then
-  fail "installed plugin contains an app/package mutation or terminal shortcut"
+  fail "installed plugin contains an app/package mutation"
+fi
+if rg -q 'xdg-terminal-exec' \
+  "$installed/Menu.qml" "$installed/Service.qml" "$installed/ManagerWidget.qml" "$installed/kids-menu.jsonc"; then
+  fail "installed plugin exposes a non-stock terminal action"
+fi
+if ! rg -Fq 'BarActions.commandFor(' "$installed/BarWidget.qml" \
+    || ! rg -Fq 'kidsModeEnabled === true ? "" : "xdg-terminal-exec"' "$installed/BarActions.js" \
+    || ! rg -Fq 'if (command.length > 0)' "$installed/BarWidget.qml"; then
+  fail "installed Omarchy button does not gate stock terminal routing by mode"
 fi
 pass "installed app handling remains filter-only"
 
