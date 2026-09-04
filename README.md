@@ -25,6 +25,21 @@ omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
 
 After installation, click the child icon on the right side of the bar to open the Kids Mode manager.
 
+## What it changes
+
+Enabling the plugin adds the Kids Mode manager to the right side of the Omarchy bar and replaces the stock menu slot with a compatible Kids Menu button. The original menu position is recorded so it can be restored later.
+
+Starting Kids Mode temporarily:
+
+- Moves the parent's open windows to a private workspace and opens a Kids workspace.
+- Limits the Omarchy menu and selected shortcuts to the approved apps and safe system actions.
+- Turns on Do Not Disturb while remembering its previous setting.
+- Launches approved browsers and web apps with the separate Kids Chromium profile.
+
+Exiting Kids Mode restores the original windows, workspaces, shortcuts, menu, and notification setting. Disabling or removing the plugin also restores the normal shell integration. The shortcut policy is applied at runtime and does not overwrite Hyprland configuration files.
+
+The plugin stores its allowlist and mode state under `~/.config/omarchy-kids/`, runtime state under `${XDG_STATE_HOME:-~/.local/state}/omarchy-kids/`, and the separate browser profile under `~/.local/share/omarchy-kids/chromium/`.
+
 ## Use
 
 1. Open the Kids Mode manager.
