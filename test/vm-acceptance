@@ -232,9 +232,12 @@ lock_is() {
 }
 
 binding_description_present() {
-  local description=$1
-  hyprctl binds -j | jq -e --arg description "$description" \
-    'any(.[]; .description == $description)'
+  local description=$1 submap
+  submap=$(hyprctl -j submap | jq -er 'if . == "default" then "" else . end') || return 1
+  hyprctl binds -j | jq -e --arg description "$description" --arg submap "$submap" '
+    any(.[]; .description == $description
+      and ((.submap // "") == $submap
+        or .submap_universal == true or .submap_universal == "true"))'
 }
 
 binding_description_absent() {
@@ -294,6 +297,20 @@ client_absent() {
   hyprctl -j clients | jq -e --arg address "$address" '
     all(.[]; .address != $address)
   '
+}
+
+client_with_title_on_workspace() {
+  local title=$1 workspace=$2
+  hyprctl -j clients | jq -e --arg title "$title" --arg workspace "$workspace" '
+    any(.[]; .title == $title and (.workspace.name // "") == $workspace)
+  '
+}
+
+client_address_with_title() {
+  local title=$1
+  hyprctl -j clients | jq -er --arg title "$title" '
+    .[] | select(.title == $title) | .address
+  ' | head -1
 }
 
 active_context_is() {
@@ -371,6 +388,13 @@ wait_until "Kids Mode can move windows among numbered workspaces" 20 \
     "Kids Mode: Move to workspace 1" "Kids Mode: Move to workspace 10"
 wait_until "Kids Mode blocks the stock terminal shortcut" 20 \
   binding_description_absent "Terminal"
+terminal_clients_before=$(hyprctl -j clients | jq -c '[.[].address] | sort')
+wtype -M logo -k Return -m logo
+sleep 2
+terminal_clients_after=$(hyprctl -j clients | jq -c '[.[].address] | sort')
+[[ $terminal_clients_after == "$terminal_clients_before" ]] \
+  || fail "the stock terminal shortcut opened a window in Kids Mode"
+pass "the stock terminal shortcut cannot open a window in Kids Mode"
 wait_until "Kids Mode blocks the DND bypass shortcut" 20 \
   binding_description_absent "Toggle silencing notifications"
 wait_until "Kids Mode blocks numbered right-side panel shortcuts" 20 \
@@ -396,6 +420,38 @@ binding_description_present "Kids Mode: Calculator" \
 pass "selected Omacalc shortcut is guarded"
 [[ -f $SHORTCUT_MARKER ]] || fail "transient shortcut ownership marker is missing"
 pass "transient shortcut ownership is recorded"
+
+if command -v foot >/dev/null; then
+  unexpected_title=OmarchyKidsUnexpectedWindow
+  uwsm-app -- foot --title="$unexpected_title" sh -c 'sleep 60' >/dev/null 2>&1 &
+  wait_until "an unexpected window remains in the private quarantine" 20 \
+    client_with_title_on_workspace "$unexpected_title" \
+    "special:omarchy-kids-quarantine"
+  unexpected_address=$(client_address_with_title "$unexpected_title")
+  [[ $unexpected_address =~ ^0x[0-9a-fA-F]+$ ]] \
+    || fail "capture the quarantined unexpected window"
+  active_context_is "1" "" \
+    || fail "an unexpected window changed the child-visible workspace"
+  hyprctl dispatch "hl.dsp.window.close({ window = \"address:$unexpected_address\" })" \
+    >/dev/null
+  wait_until "the quarantined acceptance window closes" 15 \
+    client_absent "$unexpected_address"
+else
+  pass "unexpected-window quarantine check skipped (foot absent)"
+fi
+
+printf '{malformed-mode-state\n' > "$MODE_STATE"
+omarchy restart shell
+wait_until "malformed mode state reconstructs as active from durable ownership" 25 \
+  mode_is on
+wait_until "reconstructed Kids Mode keeps the adult window session private" 20 \
+  jq -e '.active == true' \
+  "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-kids/windows.json"
+wait_until "reconstructed Kids Mode keeps the restricted shortcut layer" 20 \
+  binding_description_present "Kids Mode: Menu"
+wait_until "reconstructed Kids Mode keeps the stock menu blocked" 20 \
+  stock_menu_blocked
+wait_until "reconstructed Kids Mode keeps notifications muted" 20 dnd_is on
 
 locked_allowlist_hash=$(sha256sum "$ALLOWLIST" | awk '{print $1}')
 omarchy-shell "$MANAGER_ID" show
@@ -469,7 +525,10 @@ wait_until "legacy Apps route closes" 15 layer_absent
 if desktop_present YouTube && command -v chromium >/dev/null; then
   kids_menu_summon apps >/dev/null
   wait_until "kids root opens for web-app launch" 15 layer_present
-  wtype YouTube -s 100 -k Return
+  wtype -d 100 YouTube
+  wait_until "YouTube search is selected before launch" 15 screen_contains YouTube
+  sleep 1
+  wtype -k Return
   wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
   kids_launched_address=$(kids_youtube_address)
   [[ $kids_launched_address =~ ^0x[0-9a-fA-F]+$ ]] \
@@ -590,7 +649,10 @@ if [[ -n ${OMARCHY_KIDS_TEST_PASSWORD:-} ]]; then
   if desktop_present YouTube && command -v chromium >/dev/null; then
     kids_menu_summon apps >/dev/null
     wait_until "kids root opens for removal lifecycle launch" 15 layer_present
-    wtype YouTube -s 100 -k Return
+    wtype -d 100 YouTube
+    wait_until "YouTube removal search is ready" 15 screen_contains YouTube
+    sleep 1
+    wtype -k Return
     wait_until "removal lifecycle app uses the Kids Chromium profile" 20 \
       youtube_window_with_kids_profile
     removal_kids_address=$(kids_youtube_address)
