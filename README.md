@@ -20,7 +20,8 @@ omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
 ## Use
 
 1. Click the Kids Menu plugin icon.
-2. Search or browse the app tiles, then click the apps the child can use.
+2. Search or browse the app tiles, then click the apps the child can use. Use
+   **Selected** to review only the chosen apps.
 3. Click **Start with _n_ apps**.
 
 The Omarchy icon and `Super + Space` now open only the selected apps. When

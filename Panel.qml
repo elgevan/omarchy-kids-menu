@@ -11,6 +11,7 @@ Panel {
   property var hostWidget: null
   property var service: null
   property string filterText: ""
+  property bool showSelectedOnly: false
   property int installedAllowedCount: 0
   property bool awaitingUnlock: false
   property string authError: ""
@@ -76,6 +77,7 @@ Panel {
       var id = String(entry.id || "")
       if (!id) continue
       var allowed = root.service ? root.service.isAllowed(id) : false
+      if (root.showSelectedOnly && !allowed) continue
       if (id === currentAppId) nextCurrentIndex = appModel.count
       appModel.append({
         appId: id,
@@ -92,6 +94,9 @@ Panel {
 
   function emptyMessage() {
     if (!root.appLibrary) return "Loading installed apps…"
+    if (root.showSelectedOnly && root.filterText.length > 0)
+      return "No selected apps match this search"
+    if (root.showSelectedOnly) return "No apps selected yet"
     if (root.filterText.length > 0) return "No apps match this search"
     return "No installed apps found"
   }
@@ -272,6 +277,72 @@ Panel {
       }
 
       BorderSurface {
+        id: modeAction
+        width: parent.width
+        height: Style.space(46)
+        radius: Style.cornerRadius
+        color: root.modePhase === "inactive"
+          ? Style.selectedFillFor(root.accent, root.accent)
+          : modeActionMouse.containsMouse
+            ? Style.hoverFillFor(root.accent, root.accent)
+            : Style.normalFillFor(root.foreground, root.accent)
+        borderSpec: Border.controlSpec(
+          root.modePhase === "inactive" ? "selected" : "normal",
+          root.modePhase === "inactive" ? root.accent : root.foreground,
+          root.accent
+        )
+        opacity: root.modeActionEnabled ? 1 : 0.55
+
+        Column {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(12)
+          anchors.right: modeActionArrow.left
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+
+          Text {
+            width: parent.width
+            text: root.modeActionLabel()
+            color: root.modePhase === "inactive" ? root.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            text: root.modeActionDetail()
+            color: root.modePhase === "inactive" ? root.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        Text {
+          id: modeActionArrow
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(14)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "›"
+          color: root.modePhase === "inactive" ? root.accent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.heading
+          font.bold: true
+        }
+
+        MouseArea {
+          id: modeActionMouse
+          anchors.fill: parent
+          enabled: root.modeActionEnabled
+          hoverEnabled: true
+          cursorShape: root.modeActionEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+          onClicked: root.toggleKidsMode()
+        }
+      }
+
+      BorderSurface {
         width: parent.width
         height: Style.space(38)
         radius: Style.cornerRadius
@@ -339,32 +410,81 @@ Panel {
         }
       }
 
-      BorderSurface {
+      Row {
         width: parent.width
         height: Style.space(32)
-        radius: Style.cornerRadius
-        color: Style.selectedFillFor(root.accent, root.accent)
-        borderSpec: Border.controlSpec("selected", root.accent, root.accent)
+        spacing: Style.space(6)
 
-        Text {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          text: "✓  " + root.selectedAppsLabel() + " SELECTED"
-          color: root.accent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
+        BorderSurface {
+          width: (parent.width - parent.spacing) / 2
+          height: parent.height
+          radius: Style.cornerRadius
+          color: !root.showSelectedOnly
+            ? Style.selectedFillFor(root.accent, root.accent)
+            : allAppsMouse.containsMouse
+              ? Style.hoverFillFor(root.accent, root.accent)
+              : Style.normalFillFor(root.foreground, root.accent)
+          borderSpec: Border.controlSpec(
+            !root.showSelectedOnly ? "selected" : "normal",
+            !root.showSelectedOnly ? root.accent : root.foreground,
+            root.accent
+          )
+
+          Text {
+            anchors.centerIn: parent
+            text: "ALL APPS"
+            color: !root.showSelectedOnly ? root.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          MouseArea {
+            id: allAppsMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.showSelectedOnly = false
+              root.rebuildApps()
+            }
+          }
         }
 
-        Text {
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.allowlistEditable ? "CLICK A TILE TO CHANGE" : "LOCKED WHILE ACTIVE"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+        BorderSurface {
+          width: (parent.width - parent.spacing) / 2
+          height: parent.height
+          radius: Style.cornerRadius
+          color: root.showSelectedOnly
+            ? Style.selectedFillFor(root.accent, root.accent)
+            : selectedAppsMouse.containsMouse
+              ? Style.hoverFillFor(root.accent, root.accent)
+              : Style.normalFillFor(root.foreground, root.accent)
+          borderSpec: Border.controlSpec(
+            root.showSelectedOnly ? "selected" : "normal",
+            root.showSelectedOnly ? root.accent : root.foreground,
+            root.accent
+          )
+
+          Text {
+            anchors.centerIn: parent
+            text: "SELECTED · " + root.installedAllowedCount
+            color: root.showSelectedOnly ? root.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          MouseArea {
+            id: selectedAppsMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.showSelectedOnly = true
+              root.rebuildApps()
+            }
+          }
         }
       }
 
@@ -509,79 +629,18 @@ Panel {
         }
       }
 
-      BorderSurface {
-        id: modeAction
-        width: parent.width
-        height: Style.space(46)
-        radius: Style.cornerRadius
-        color: root.modePhase === "inactive"
-          ? Style.selectedFillFor(root.accent, root.accent)
-          : modeActionMouse.containsMouse
-            ? Style.hoverFillFor(root.accent, root.accent)
-            : Style.normalFillFor(root.foreground, root.accent)
-        borderSpec: Border.controlSpec(
-          root.modePhase === "inactive" ? "selected" : "normal",
-          root.modePhase === "inactive" ? root.accent : root.foreground,
-          root.accent
-        )
-        opacity: root.modeActionEnabled ? 1 : 0.55
-
-        Column {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(12)
-          anchors.right: modeActionArrow.left
-          anchors.rightMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(1)
-
-          Text {
-            width: parent.width
-            text: root.modeActionLabel()
-            color: root.modePhase === "inactive" ? root.accent : root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
-          }
-
-          Text {
-            width: parent.width
-            text: root.modeActionDetail()
-            color: root.modePhase === "inactive" ? root.accent : root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-        }
-
-        Text {
-          id: modeActionArrow
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(14)
-          anchors.verticalCenter: parent.verticalCenter
-          text: "›"
-          color: root.modePhase === "inactive" ? root.accent : root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.heading
-          font.bold: true
-        }
-
-        MouseArea {
-          id: modeActionMouse
-          anchors.fill: parent
-          enabled: root.modeActionEnabled
-          hoverEnabled: true
-          cursorShape: root.modeActionEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: root.toggleKidsMode()
-        }
-      }
-
       Row {
         width: parent.width
         spacing: Style.space(6)
 
-        Item {
+        Text {
           width: parent.width - resetButton.width - parent.spacing
-          height: 1
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.allowlistEditable ? "CLICK A TILE TO CHANGE" : "LOCKED WHILE ACTIVE"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
         }
 
         BorderSurface {

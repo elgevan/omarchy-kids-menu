@@ -1643,10 +1643,12 @@ fi
 rg -Fq 'id: appGrid' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'cellWidth: width / root.appGridColumnCount' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'text: "Search apps…"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq '" SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'property bool showSelectedOnly: false' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'if (root.showSelectedOnly && !allowed) continue' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'text: "ALL APPS"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'text: "SELECTED · " + root.installedAllowedCount' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'return "START WITH " + root.selectedAppsLabel()' "$PLUGIN_ROOT/Panel.qml" \
-  && ! rg -Fq 'selectionFilter' "$PLUGIN_ROOT/Panel.qml" \
-  || fail "the app picker is not the searchable tile-first flow"
+  || fail "the app picker is not the searchable tile-first flow with selected-app review"
 
 rg -Fq 'import "BarActions.js" as BarActions' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -Fq 'root.kidsModeEnabled,' "$PLUGIN_ROOT/BarWidget.qml" \
