@@ -264,7 +264,16 @@ Item {
       ? root.pluginRegistry.installedPlugins
       : null
     root.exemptPluginOptions = ShellIntegration.exemptablePluginOptions(
-      installedPlugins, root.pluginId)
+      installedPlugins, root.pluginId,
+      root.shell ? root.shell.shellConfig : null)
+  }
+
+  function effectiveExemptPluginIds() {
+    var available = ({})
+    for (var option = 0; option < root.exemptPluginOptions.length; option++)
+      available[root.exemptPluginOptions[option].id] = true
+    return Preferences.normalizePluginIds(root.exemptPluginIds).filter(
+      function(id) { return available[id] === true })
   }
 
   function isPluginExempt(pluginId) {
@@ -1129,7 +1138,7 @@ Item {
       installedPlugins,
       root.pluginId,
       root.managerWidgetId,
-      root.exemptPluginIds
+      root.effectiveExemptPluginIds()
     )
   }
 
@@ -1166,7 +1175,7 @@ Item {
         : null
       if (root.modeEffectsDesired && typeof root.shell.hide === "function") {
         var hiddenPluginIds = ShellIntegration.hiddenPluginIds(
-          installedPlugins, root.pluginId, root.exemptPluginIds)
+          installedPlugins, root.pluginId, root.effectiveExemptPluginIds())
         for (var i = 0; i < hiddenPluginIds.length; i++)
           root.shell.hide(hiddenPluginIds[i])
       }
@@ -1181,7 +1190,7 @@ Item {
             root.managerWidgetPath,
             root.modeEffectsDesired,
             installedPlugins,
-            root.exemptPluginIds
+            root.effectiveExemptPluginIds()
           )
           if (result && result.restore) root.stockMenuRestore = result.restore
           root.barLayoutRestore = result && result.barRestore
@@ -1478,13 +1487,17 @@ Item {
   }
 
   onShellChanged: {
+    root.refreshExemptPluginOptions()
     root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
   }
 
   Connections {
     target: root.shell
-    function onShellConfigChanged() { root.scheduleShellPolicyVerification() }
+    function onShellConfigChanged() {
+      if (!root.modeEffectsDesired) root.refreshExemptPluginOptions()
+      root.scheduleShellPolicyVerification()
+    }
   }
   Connections {
     target: root.pluginRegistry

@@ -46,7 +46,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.19.0" and
+  .version == "0.20.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -67,7 +67,7 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
   && rg -Fq 'Cloudflare 1.1.1.1 for Families' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Open the gearbox in the Kids Menu panel' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Family or AdGuard Family instead.' "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'The gearbox also lists installed plugins' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'The gearbox also lists user-installed plugin widgets' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'only exempt plugins you trust a child to use' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'DNS filtering blocks domains' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
@@ -448,14 +448,8 @@ assert.deepEqual(
 )
 
 const exemptableIds = integration.exemptablePluginOptions(
-  installedPlugins, pluginId).map(option => option.id)
-assert.equal(exemptableIds.includes("omarchy.menu"), false)
-assert.equal(exemptableIds.includes("omarchy.audio"), false)
-assert.equal(exemptableIds.includes(pluginId), false)
-assert.equal(exemptableIds.includes("omarchy.clock"), true)
-assert.equal(exemptableIds.includes("omarchy.media"), true)
-assert.equal(exemptableIds.includes("third.party.panel"), true)
-assert.equal(exemptableIds.includes("third.party.widget"), true)
+  installedPlugins, pluginId, policyConfig).map(option => option.id)
+assert.deepEqual(exemptableIds, ["third.party.widget"])
 
 const exemptions = [
   "omarchy.clock", "omarchy.media", "third.party.panel",
@@ -499,6 +493,9 @@ assert.deepEqual(exemptionConfig.disabledPlugins.slice().sort(), [
 ])
 assert.equal(integration.kidsPluginPolicyMatches(
   exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+assert.deepEqual(integration.exemptablePluginOptions(
+  installedPlugins, pluginId, exemptionConfig).map(option => option.id),
+  ["third.party.widget"])
 assert.deepEqual(integration.hiddenPluginIds(
   installedPlugins, pluginId, exemptions).slice().sort(), [
   "omarchy.clipboard", "omarchy.hybrid", "omarchy.menu", "omarchy.osd"
@@ -805,7 +802,8 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -Fq 'browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'tooltipText: "Kids Menu settings"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'text: "KEEP PLUGINS AVAILABLE"' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq 'installedPlugins, root.pluginId, root.exemptPluginIds' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.effectiveExemptPluginIds()' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'wrapMode: Text.WordWrap' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \

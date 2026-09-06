@@ -795,7 +795,8 @@ Panel {
             readonly property bool selected: root.service
               && root.service.browserProtectionProvider === modelData.id
             width: settingsPage.width
-            height: Style.space(58)
+            height: Math.max(Style.space(66),
+              providerLabels.implicitHeight + Style.space(20))
             radius: Style.cornerRadius
             opacity: root.service && root.service.settingsEditable ? 1 : 0.55
             color: selected
@@ -835,6 +836,7 @@ Panel {
             }
 
             Column {
+              id: providerLabels
               anchors.left: parent.left
               anchors.leftMargin: Style.space(44)
               anchors.right: parent.right
@@ -857,7 +859,7 @@ Panel {
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
+                wrapMode: Text.WordWrap
               }
             }
 
@@ -890,7 +892,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: "Selected plugins stay usable in Kids Menu. Only choose plugins you trust a child to use."
+          text: "Selected user-installed widgets from the top-right bar stay usable in Kids Menu. Only choose plugins you trust a child to use."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
@@ -900,7 +902,7 @@ Panel {
         Text {
           visible: !root.service || root.service.exemptPluginOptions.length === 0
           width: parent.width
-          text: "No additional visible plugins are installed."
+          text: "No user-installed widgets are in the top-right bar."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body

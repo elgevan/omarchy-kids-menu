@@ -166,13 +166,23 @@ function manifestHasVisibleSurface(manifest) {
   return false
 }
 
-function exemptablePluginOptions(installedPlugins, pluginId) {
-  if (!isObject(installedPlugins)) return []
+function exemptablePluginOptions(installedPlugins, pluginId, config) {
+  if (!isObject(installedPlugins) || !isObject(config)
+      || !isObject(config.bar) || !isObject(config.bar.layout)
+      || !Array.isArray(config.bar.layout.right))
+    return []
+  var pluginLocation = barLocation(config, pluginId)
+  var restore = pluginLocation && isObject(pluginLocation.entry)
+    ? normalizedBarRestore(pluginLocation.entry[BAR_RESTORE_KEY])
+    : null
+  var rightBarIds = (restore ? restore.right : config.bar.layout.right).map(entryId)
   var options = []
   for (var id in installedPlugins) {
     var manifest = installedPlugins[id]
     if (id === STOCK_MENU_ID || isAllowedVisiblePlugin(id, pluginId)
-        || !manifestHasVisibleSurface(manifest))
+        || !manifest || manifest.__isFirstParty === true
+        || !arrayContains(manifest.kinds, "bar-widget")
+        || rightBarIds.indexOf(String(id)) === -1)
       continue
     options.push({
       id: String(id),
