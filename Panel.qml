@@ -11,11 +11,11 @@ Panel {
   property var hostWidget: null
   property var service: null
   property string filterText: ""
-  property string selectionFilter: "all"
-  property int installedAppCount: 0
   property int installedAllowedCount: 0
   property bool awaitingUnlock: false
   property string authError: ""
+
+  readonly property int appGridColumnCount: 3
 
   readonly property var barIdentity: hostWidget || root
   readonly property var appLibrary: bar && bar.shell ? bar.shell.appLibrary : null
@@ -30,6 +30,7 @@ Panel {
   readonly property bool modeActionEnabled: root.service && root.service.modeStateLoaded
     && (root.modePhase === "inactive" || root.modePhase === "active"
       || root.modePhase === "error")
+    && (root.modePhase !== "inactive" || root.installedAllowedCount > 0)
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -52,8 +53,11 @@ Panel {
   }
 
   function rebuildApps() {
+    var currentAppId = ""
+    if (appGrid.currentIndex >= 0 && appGrid.currentIndex < appModel.count)
+      currentAppId = String(appModel.get(appGrid.currentIndex).appId || "")
+
     appModel.clear()
-    root.installedAppCount = 0
     root.installedAllowedCount = 0
     if (!root.appLibrary) return
 
@@ -61,19 +65,18 @@ Panel {
     for (var available = 0; available < installedRows.length; available++) {
       var availableEntry = installedRows[available].entry
       if (!availableEntry || !String(availableEntry.id || "")) continue
-      root.installedAppCount++
       if (root.service && root.service.isAllowed(availableEntry.id))
         root.installedAllowedCount++
     }
 
     var rows = root.appLibrary.sortedEntries(root.filterText)
+    var nextCurrentIndex = 0
     for (var i = 0; i < rows.length; i++) {
       var entry = rows[i].entry
       var id = String(entry.id || "")
       if (!id) continue
       var allowed = root.service ? root.service.isAllowed(id) : false
-      if (root.selectionFilter === "selected" && !allowed) continue
-      if (root.selectionFilter === "not-selected" && allowed) continue
+      if (id === currentAppId) nextCurrentIndex = appModel.count
       appModel.append({
         appId: id,
         appName: root.appLibrary.entryName(entry),
@@ -82,34 +85,25 @@ Panel {
         appAllowed: allowed
       })
     }
-    if (appModel.count > 0 && appList.currentIndex < 0) appList.currentIndex = 0
-  }
-
-  function setSelectionFilter(value) {
-    if (value !== "all" && value !== "selected" && value !== "not-selected") return
-    if (root.selectionFilter === value) return
-    root.selectionFilter = value
-    root.rebuildApps()
-  }
-
-  function filterCount(value) {
-    if (value === "selected") return root.installedAllowedCount
-    if (value === "not-selected") return Math.max(0, root.installedAppCount - root.installedAllowedCount)
-    return root.installedAppCount
+    appGrid.currentIndex = appModel.count > 0 ? nextCurrentIndex : -1
+    if (appGrid.currentIndex >= 0)
+      appGrid.positionViewAtIndex(appGrid.currentIndex, GridView.Contain)
   }
 
   function emptyMessage() {
     if (!root.appLibrary) return "Loading installed apps…"
     if (root.filterText.length > 0) return "No apps match this search"
-    if (root.selectionFilter === "selected") return "No apps are currently selected"
-    if (root.selectionFilter === "not-selected") return "All installed apps are selected"
     return "No installed apps found"
   }
 
   function toggleCurrent() {
     if (!root.allowlistEditable || !root.service
-        || appList.currentIndex < 0 || appList.currentIndex >= appModel.count) return
-    root.service.toggleAllowed(appModel.get(appList.currentIndex).appId)
+        || appGrid.currentIndex < 0 || appGrid.currentIndex >= appModel.count) return
+    root.service.toggleAllowed(appModel.get(appGrid.currentIndex).appId)
+  }
+
+  function selectedAppsLabel() {
+    return root.installedAllowedCount + (root.installedAllowedCount === 1 ? " APP" : " APPS")
   }
 
   function toggleKidsMode() {
@@ -159,7 +153,7 @@ Panel {
       return "RESTORING DESKTOP…"
     if (root.modePhase === "error") return "AUTHENTICATE & RESTORE"
     if (root.modePhase === "active") return "EXIT KIDS MENU"
-    return "START KIDS MENU"
+    return "START WITH " + root.selectedAppsLabel()
   }
 
   function modeActionDetail() {
@@ -173,6 +167,7 @@ Panel {
         ? "Use your password or fingerprint to restore " + root.service.hiddenWindowCount + " windows"
         : "Use your password or fingerprint to return to your desktop"
     }
+    if (root.installedAllowedCount === 0) return "Choose at least one app to continue"
     return "Chosen apps, muted notifications, and protected web browsing"
   }
 
@@ -239,11 +234,13 @@ Panel {
                   ? root.service.shortcutPolicyError
                   : root.service && root.service.browserProtectionError.length > 0
                     ? root.service.browserProtectionError
-                  : ""
-            visible: text.length > 0
+                  : root.modePhase === "active"
+                    ? "Only the selected apps are available right now"
+                    : "Choose the apps your child can use"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
           }
         }
 
@@ -270,6 +267,244 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
+          }
+        }
+      }
+
+      BorderSurface {
+        width: parent.width
+        height: Style.space(38)
+        radius: Style.cornerRadius
+        color: Style.normalFillFor(root.foreground, root.accent)
+        borderSpec: Border.controlSpec(searchInput.activeFocus ? "selected" : "normal", searchInput.activeFocus ? root.accent : root.foreground, root.accent)
+
+        Text {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: ""
+          color: searchInput.activeFocus ? root.accent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+
+        TextInput {
+          id: searchInput
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(34)
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          color: root.foreground
+          selectionColor: root.accent
+          selectedTextColor: Color.background
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          clip: true
+          onTextChanged: {
+            root.filterText = text
+            root.rebuildApps()
+          }
+          Keys.onPressed: function(event) {
+            if ((event.modifiers & Qt.ControlModifier)
+                && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_K) {
+              root.toggleKidsMode()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Escape) {
+              root.close()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Down) {
+              if (appGrid.currentIndex < 0 && appModel.count > 0) appGrid.currentIndex = 0
+              appGrid.forceActiveFocus()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              root.toggleCurrent()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Tab) {
+              if (event.modifiers & Qt.ShiftModifier) root.switchPanel(-1)
+              else appGrid.forceActiveFocus()
+              event.accepted = true
+            }
+          }
+        }
+
+        Text {
+          visible: searchInput.text.length === 0
+          anchors.left: searchInput.left
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Search apps…"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+      }
+
+      BorderSurface {
+        width: parent.width
+        height: Style.space(32)
+        radius: Style.cornerRadius
+        color: Style.selectedFillFor(root.accent, root.accent)
+        borderSpec: Border.controlSpec("selected", root.accent, root.accent)
+
+        Text {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "✓  " + root.selectedAppsLabel() + " SELECTED"
+          color: root.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.allowlistEditable ? "CLICK A TILE TO CHANGE" : "LOCKED WHILE ACTIVE"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      Item {
+        width: parent.width
+        height: Style.space(360)
+
+        Text {
+          visible: appModel.count === 0
+          anchors.centerIn: parent
+          text: root.emptyMessage()
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+
+        GridView {
+          id: appGrid
+          anchors.fill: parent
+          model: appModel
+          clip: true
+          cellWidth: width / root.appGridColumnCount
+          cellHeight: Style.space(108)
+          boundsBehavior: Flickable.StopAtBounds
+          keyNavigationEnabled: true
+          currentIndex: appModel.count > 0 ? 0 : -1
+
+          Keys.onPressed: function(event) {
+            if ((event.modifiers & Qt.ControlModifier)
+                && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_K) {
+              root.toggleKidsMode()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Escape) {
+              root.close()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                       || event.key === Qt.Key_Space) {
+              root.toggleCurrent()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Tab) {
+              if (event.modifiers & Qt.ShiftModifier) searchInput.forceActiveFocus()
+              else root.switchPanel(1)
+              event.accepted = true
+            }
+          }
+
+          delegate: Item {
+            id: tileCell
+            required property int index
+            required property string appId
+            required property string appName
+            required property string appDetail
+            required property string appIcon
+            required property bool appAllowed
+
+            width: appGrid.cellWidth
+            height: appGrid.cellHeight
+
+            BorderSurface {
+              id: appTile
+              anchors.fill: parent
+              anchors.rightMargin: Style.space(6)
+              anchors.bottomMargin: Style.space(6)
+              radius: Style.cornerRadius
+              color: tileCell.appAllowed
+                ? Style.selectedFillFor(root.accent, root.accent)
+                : tileMouse.containsMouse || appGrid.currentIndex === tileCell.index
+                  ? Style.hoverFillFor(root.accent, root.accent)
+                  : Style.normalFillFor(root.foreground, root.accent)
+              borderSpec: Border.controlSpec(
+                tileCell.appAllowed ? "selected" : "normal",
+                tileCell.appAllowed ? root.accent : root.foreground,
+                root.accent
+              )
+
+              Image {
+                id: iconImage
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(12)
+                width: Style.space(38)
+                height: width
+                source: tileCell.appIcon
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                sourceSize.width: width
+                sourceSize.height: height
+              }
+
+              Text {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(6)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.top: iconImage.bottom
+                anchors.topMargin: Style.space(6)
+                textFormat: Text.PlainText
+                text: tileCell.appName
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: tileCell.appAllowed
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+              }
+
+              BorderSurface {
+                visible: tileCell.appAllowed
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(7)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(7)
+                width: Style.space(20)
+                height: width
+                radius: height / 2
+                color: root.accent
+                borderSpec: Border.none()
+
+                Text {
+                  anchors.centerIn: parent
+                  text: "✓"
+                  color: Color.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+              }
+
+              MouseArea {
+                id: tileMouse
+                anchors.fill: parent
+                enabled: root.allowlistEditable
+                hoverEnabled: true
+                cursorShape: root.allowlistEditable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                  appGrid.currentIndex = tileCell.index
+                  if (root.service) root.service.toggleAllowed(tileCell.appId)
+                }
+              }
+            }
           }
         }
       }
@@ -335,254 +570,8 @@ Panel {
           anchors.fill: parent
           enabled: root.modeActionEnabled
           hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
+          cursorShape: root.modeActionEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: root.toggleKidsMode()
-        }
-      }
-
-      BorderSurface {
-        width: parent.width
-        height: Style.space(38)
-        radius: Style.cornerRadius
-        color: Style.normalFillFor(root.foreground, root.accent)
-        borderSpec: Border.controlSpec(searchInput.activeFocus ? "selected" : "normal", searchInput.activeFocus ? root.accent : root.foreground, root.accent)
-
-        Text {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          text: ""
-          color: searchInput.activeFocus ? root.accent : root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-        }
-
-        TextInput {
-          id: searchInput
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(34)
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          color: root.foreground
-          selectionColor: root.accent
-          selectedTextColor: Color.background
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          clip: true
-          onTextChanged: {
-            root.filterText = text
-            root.rebuildApps()
-          }
-          Keys.onPressed: function(event) {
-            if ((event.modifiers & Qt.ControlModifier)
-                && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_K) {
-              root.toggleKidsMode()
-              event.accepted = true
-            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_1) {
-              root.setSelectionFilter("all")
-              event.accepted = true
-            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_2) {
-              root.setSelectionFilter("selected")
-              event.accepted = true
-            } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_3) {
-              root.setSelectionFilter("not-selected")
-              event.accepted = true
-            } else if (event.key === Qt.Key_Escape) {
-              root.close()
-              event.accepted = true
-            } else if (event.key === Qt.Key_Down) {
-              if (appModel.count > 0) appList.currentIndex = Math.min(appModel.count - 1, appList.currentIndex + 1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Up) {
-              if (appModel.count > 0) appList.currentIndex = Math.max(0, appList.currentIndex - 1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-              root.toggleCurrent()
-              event.accepted = true
-            } else if (event.key === Qt.Key_Tab) {
-              root.switchPanel((event.modifiers & Qt.ShiftModifier) ? -1 : 1)
-              event.accepted = true
-            }
-          }
-        }
-
-        Text {
-          visible: searchInput.text.length === 0
-          anchors.left: searchInput.left
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Search installed apps…"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-        }
-      }
-
-      ListModel {
-        id: selectionFilterModel
-        ListElement { filterKey: "all"; filterLabel: "ALL" }
-        ListElement { filterKey: "selected"; filterLabel: "SELECTED" }
-        ListElement { filterKey: "not-selected"; filterLabel: "NOT SELECTED" }
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(6)
-
-        Repeater {
-          model: selectionFilterModel
-
-          delegate: BorderSurface {
-            id: filterButton
-            required property string filterKey
-            required property string filterLabel
-
-            readonly property bool selected: root.selectionFilter === filterButton.filterKey
-
-            width: (contentColumn.width - Style.space(12)) / 3
-            height: Style.space(32)
-            radius: height / 2
-            color: filterButton.selected
-              ? Style.selectedFillFor(root.accent, root.accent)
-              : filterMouse.containsMouse
-                ? Style.hoverFillFor(root.accent, root.accent)
-                : Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec(
-              filterButton.selected ? "selected" : "normal",
-              filterButton.selected ? root.accent : root.foreground,
-              root.accent
-            )
-
-            Text {
-              anchors.centerIn: parent
-              text: filterButton.filterLabel + "  " + root.filterCount(filterButton.filterKey)
-              color: filterButton.selected ? root.accent : root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: filterButton.selected
-            }
-
-            MouseArea {
-              id: filterMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.setSelectionFilter(filterButton.filterKey)
-            }
-          }
-        }
-      }
-
-      Item {
-        width: parent.width
-        height: Style.space(360)
-
-        Text {
-          visible: appModel.count === 0
-          anchors.centerIn: parent
-          text: root.emptyMessage()
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-        }
-
-        ListView {
-          id: appList
-          anchors.fill: parent
-          model: appModel
-          clip: true
-          spacing: Style.space(2)
-          boundsBehavior: Flickable.StopAtBounds
-          currentIndex: appModel.count > 0 ? 0 : -1
-
-          delegate: BorderSurface {
-            id: appRow
-            required property int index
-            required property string appId
-            required property string appName
-            required property string appDetail
-            required property string appIcon
-            required property bool appAllowed
-
-            width: ListView.view.width
-            height: Style.space(50)
-            radius: Style.cornerRadius
-            color: rowMouse.containsMouse || appList.currentIndex === appRow.index
-              ? Style.hoverFillFor(root.accent, root.accent)
-              : "transparent"
-            borderSpec: appRow.appAllowed
-              ? Border.controlSpec("selected", root.accent, root.accent)
-              : Border.none()
-
-            Image {
-              id: iconImage
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(26)
-              height: width
-              source: appRow.appIcon
-              fillMode: Image.PreserveAspectFit
-              asynchronous: true
-              sourceSize.width: width
-              sourceSize.height: height
-            }
-
-            Column {
-              anchors.left: iconImage.right
-              anchors.leftMargin: Style.space(8)
-              anchors.right: stateText.left
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(1)
-
-              Text {
-                width: parent.width
-                textFormat: Text.PlainText
-                text: appRow.appName
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: appRow.appAllowed
-                elide: Text.ElideRight
-              }
-
-              Text {
-                visible: text.length > 0
-                width: parent.width
-                textFormat: Text.PlainText
-                text: appRow.appDetail
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
-              }
-            }
-
-            Text {
-              id: stateText
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(12)
-              anchors.verticalCenter: parent.verticalCenter
-              text: appRow.appAllowed ? "✓" : root.allowlistEditable ? "+" : "—"
-              color: appRow.appAllowed && root.allowlistEditable ? root.accent : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
-              font.bold: true
-            }
-
-            MouseArea {
-              id: rowMouse
-              anchors.fill: parent
-              enabled: root.allowlistEditable
-              hoverEnabled: true
-              cursorShape: root.allowlistEditable ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: {
-                appList.currentIndex = appRow.index
-                if (root.service) root.service.toggleAllowed(appRow.appId)
-              }
-            }
-          }
         }
       }
 

@@ -46,7 +46,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.16.0" and
+  .version == "0.17.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -1639,6 +1639,14 @@ if rg -q 'PamContext|Services\.Pam|pkexec|sudo|enteredPassword|pendingPassword' 
   "$PLUGIN_ROOT/Panel.qml" "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/ManagerWidget.qml"; then
   fail "the plugin handles credentials directly or invokes a privileged helper"
 fi
+
+rg -Fq 'id: appGrid' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'cellWidth: width / root.appGridColumnCount' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'text: "Search apps…"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq '" SELECTED"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'return "START WITH " + root.selectedAppsLabel()' "$PLUGIN_ROOT/Panel.qml" \
+  && ! rg -Fq 'selectionFilter' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "the app picker is not the searchable tile-first flow"
 
 rg -Fq 'import "BarActions.js" as BarActions' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -Fq 'root.kidsModeEnabled,' "$PLUGIN_ROOT/BarWidget.qml" \
