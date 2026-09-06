@@ -46,7 +46,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.20.0" and
+  .version == "0.21.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -64,6 +64,7 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'This applies uniformly to non-web apps' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Cloudflare 1.1.1.1 for Families' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Open the gearbox in the Kids Menu panel' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Family or AdGuard Family instead.' "$PLUGIN_ROOT/README.md" \
@@ -203,6 +204,24 @@ assert.deepEqual(
 )
 assert.deepEqual(admission.classCandidates("chromium", "Chromium", ["uwsm-app"]), ["chromium"])
 assert.deepEqual(admission.normalizeClasses([" Chromium ", "chromium", "OMAwRiTe"]), ["chromium", "omawrite"])
+assert.equal(admission.savedWindowClasses(""), null)
+assert.equal(admission.savedWindowClasses("not json"), null)
+assert.equal(admission.savedWindowClasses("x".repeat(1048577)), null)
+assert.equal(admission.savedWindowClasses(JSON.stringify({version: 2,
+  active: true, windows: []})), null)
+assert.deepEqual(admission.savedWindowClasses(JSON.stringify({version: 1,
+  active: false, windows: []})), [])
+assert.deepEqual(admission.savedWindowClasses(JSON.stringify({version: 1,
+  active: true,
+  windows: [
+    {class: "Cursor", initialClass: "cursor"},
+    {class: "org.example.Writer", initialClass: ""}
+  ]
+})), ["cursor", "org.example.writer"])
+assert.equal(admission.classListsOverlap(
+  ["cursor", "cursor.desktop"], ["Cursor"]), true)
+assert.equal(admission.classListsOverlap(
+  ["omawrite"], ["cursor"]), false)
 assert.equal(admission.normalizeAddress("ABC123"), "0xabc123")
 assert.equal(admission.normalizeAddress("0xDeF456"), "0xdef456")
 assert.equal(admission.normalizeAddress("not-an-address"), "")
@@ -812,9 +831,11 @@ rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode("Could not maintain the Kids Menu shell")' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode(root.windowSessionError)' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode(root.shortcutPolicyError)' "$PLUGIN_ROOT/Service.qml" \
-  && rg -Fq 'function authorizeAppLaunch(desktopId, browserRouted)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'function authorizeAppLaunch(desktopId, browserRouted, displayName)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'WindowAdmission.classListsOverlap(classes, root.adultWindowClasses)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'onLoaded: root.loadWindowSnapshot(text())' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'expectedWindows: root.pendingExpectedWindows()' "$PLUGIN_ROOT/Service.qml" \
-  && rg -Fq 'if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl)) return' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -Fq 'if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl))' "$PLUGIN_ROOT/Menu.qml" \
   && ! rg -Fq 'function guardAppLaunch()' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'if (root.modePhase !== "entering") return' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.beginModeStateRecovery(enabled === false ? "inactive" : "unknown")' "$PLUGIN_ROOT/Service.qml" \

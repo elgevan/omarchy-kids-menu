@@ -41,6 +41,47 @@ function normalizeClasses(values) {
   return result
 }
 
+function savedWindowClasses(rawText) {
+  var text = String(rawText || "")
+  if (!text || text.length > 1048576) return null
+
+  var state
+  try {
+    state = JSON.parse(text)
+  } catch (error) {
+    return null
+  }
+  if (!state || typeof state !== "object" || state.version !== 1
+      || typeof state.active !== "boolean" || !Array.isArray(state.windows)
+      || state.windows.length > 512)
+    return null
+  if (!state.active) return []
+
+  var classes = []
+  for (var i = 0; i < state.windows.length; i++) {
+    var window = state.windows[i]
+    if (!window || typeof window !== "object") return null
+    var windowClass = window.class === undefined ? "" : window.class
+    var initialClass = window.initialClass === undefined ? "" : window.initialClass
+    if (typeof windowClass !== "string" || windowClass.length > 256
+        || typeof initialClass !== "string" || initialClass.length > 256)
+      return null
+    addClass(classes, windowClass)
+    addClass(classes, initialClass)
+  }
+  classes.sort()
+  return classes
+}
+
+function classListsOverlap(left, right) {
+  var normalizedLeft = normalizeClasses(left)
+  var normalizedRight = normalizeClasses(right)
+  for (var i = 0; i < normalizedLeft.length; i++) {
+    if (normalizedRight.indexOf(normalizedLeft[i]) !== -1) return true
+  }
+  return false
+}
+
 function eventParts(event, count) {
   try {
     if (event && event.parse) return event.parse(count)
@@ -56,6 +97,8 @@ if (typeof module !== "undefined") {
     executableClass: executableClass,
     classCandidates: classCandidates,
     normalizeClasses: normalizeClasses,
+    savedWindowClasses: savedWindowClasses,
+    classListsOverlap: classListsOverlap,
     eventParts: eventParts
   }
 }

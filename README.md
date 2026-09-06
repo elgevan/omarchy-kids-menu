@@ -32,6 +32,13 @@ Starting Kids Menu temporarily updates the Omarchy shell layout, notification
 state, and Hyprland session state. The plugin records the previous values before
 applying those changes and restores them when Kids Menu ends.
 
+An app window that was already open before Kids Menu remains part of the adult
+session, even when that app is selected for a child. When a selected non-web app
+already has a matching adult window, Kids Menu blocks the launch and asks you to
+exit Kids Menu and close the adult instance first.
+This applies uniformly to non-web apps and prevents an existing document or
+signed-in session from crossing into the Kids session.
+
 The separate browser profile is kept between sessions at:
 
 ```text

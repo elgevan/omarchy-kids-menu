@@ -75,7 +75,7 @@ Loader {
     }
 
     function launch(desktopId, name) {
-      if (!root.sourceAppLibrary || !root.kidsModeActive) return
+      if (!root.sourceAppLibrary || !root.kidsModeActive) return false
 
       var entry = filteredAppLibrary.entryFor(desktopId)
       var webAppUrl = KidsBrowser.webAppUrl(
@@ -86,14 +86,17 @@ Loader {
       // one persistent, login-free Chromium profile. This prevents a web-app
       // shortcut such as YouTube from falling through to the adult profile.
       if (KidsBrowser.isBrowser(desktopId) || webAppUrl) {
-        if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl)) return
+        if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl))
+          return false
         if (typeof root.sourceAppLibrary.beginLaunchFeedback === "function")
           root.sourceAppLibrary.beginLaunchFeedback(name)
-        return
+        return true
       }
 
-      if (!root.allowlistService.authorizeAppLaunch(desktopId, false)) return
+      if (!root.allowlistService.authorizeAppLaunch(desktopId, false, name))
+        return false
       root.sourceAppLibrary.launch(desktopId, name)
+      return true
     }
 
     function refreshIcons() {
@@ -153,8 +156,8 @@ Loader {
     var desktopId = KidsBrowser.normalizeDesktopId(payload.desktopId)
     if (!desktopId || !root.allowlistService.isAllowed(desktopId)) return "blocked"
 
-    filteredAppLibrary.launch(desktopId, String(payload.name || desktopId))
-    return "ok"
+    return filteredAppLibrary.launch(desktopId, String(payload.name || desktopId))
+      ? "ok" : "blocked"
   }
 
   function configureMenu() {

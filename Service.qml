@@ -56,6 +56,8 @@ Item {
   property bool windowSessionDesired: false
   property bool windowSessionApplied: false
   property bool windowSessionSynced: false
+  property bool windowSnapshotLoaded: false
+  property var adultWindowClasses: []
   property int windowGuardAttemptsRemaining: 0
   property bool windowAdmissionPending: false
   property var pendingLaunchAuthorizations: []
@@ -80,6 +82,7 @@ Item {
   readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
   readonly property string stateDir: stateRoot + "/omarchy-kids"
   readonly property string notificationStatePath: stateDir + "/notifications.json"
+  readonly property string windowStatePath: stateDir + "/windows.json"
   readonly property string runtimeRoot: Quickshell.env("XDG_RUNTIME_DIR") || stateRoot
   readonly property string runtimeToolDir: runtimeRoot + "/omarchy-kids/tools"
   readonly property var defaultDesktopIds: Allowlist.defaultIds()
@@ -439,6 +442,8 @@ Item {
     root.modeEffectsDesired = false
     root.controlReleaseStarted = false
     root.pendingLaunchAuthorizations = []
+    root.windowSnapshotLoaded = false
+    root.adultWindowClasses = []
     root.activationWaitingForTools = !root.runtimeToolsReady
     root.setEffectiveMode(true)
     if (!root.runtimeToolsReady) {
@@ -809,6 +814,8 @@ Item {
       root.hiddenWindowCount = Math.max(0, Number(result.hidden || 0))
       root.windowSessionApplied = true
       root.windowSessionSynced = true
+      root.windowSnapshotLoaded = false
+      windowStateFile.reload()
       root.advanceActivation()
     } else {
       root.hiddenWindowCount = 0
@@ -842,6 +849,21 @@ Item {
       values = values.concat(KidsBrowser.windowClasses(
         KidsBrowser.webAppUrl(entry.command, entry.execString)))
     return WindowAdmission.normalizeClasses(values)
+  }
+
+  function loadWindowSnapshot(rawText) {
+    var classes = WindowAdmission.savedWindowClasses(rawText)
+    root.adultWindowClasses = classes === null ? [] : classes
+    root.windowSnapshotLoaded = classes !== null
+  }
+
+  function notifyAppLaunchBlocked(displayName, message) {
+    var label = String(displayName || "This app")
+      .replace(/[\r\n\t]+/g, " ").trim().slice(0, 100)
+    Quickshell.execDetached([
+      "omarchy-notification-send",
+      label + ": " + message
+    ])
   }
 
   // Used only to migrate an active snapshot written before admissionVersion 1.
@@ -879,11 +901,24 @@ Item {
     return true
   }
 
-  function authorizeAppLaunch(desktopId, browserRouted) {
+  function authorizeAppLaunch(desktopId, browserRouted, displayName) {
     var id = KidsBrowser.normalizeDesktopId(desktopId)
     if (!id || !root.isAllowed(id)) return false
-    return root.authorizeWindowClasses(
-      root.classesForEntry(root.desktopEntryFor(id), browserRouted === true))
+    var classes = root.classesForEntry(
+      root.desktopEntryFor(id), browserRouted === true)
+    if (browserRouted !== true) {
+      if (!root.windowSnapshotLoaded) {
+        root.notifyAppLaunchBlocked(displayName || id,
+          "Kids Menu is still checking existing windows. Try again in a moment.")
+        return false
+      }
+      if (WindowAdmission.classListsOverlap(classes, root.adultWindowClasses)) {
+        root.notifyAppLaunchBlocked(displayName || id,
+          "Already open outside Kids Menu. Exit Kids Menu and close it before trying again.")
+        return false
+      }
+    }
+    return root.authorizeWindowClasses(classes)
   }
 
   function authorizeBrowserLaunch() {
@@ -1275,6 +1310,17 @@ Item {
     printErrors: false
     onLoaded: root.loadNotificationState(text())
     onLoadFailed: root.loadNotificationState("")
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: windowStateFile
+    path: root.windowStatePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadWindowSnapshot(text())
+    onLoadFailed: root.loadWindowSnapshot("")
     onFileChanged: reload()
   }
 
