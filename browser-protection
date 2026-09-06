@@ -1,0 +1,121 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+ACTION=${1:-}
+PROFILE_DIR=${OMARCHY_KIDS_BROWSER_PROFILE:-$HOME/.local/share/omarchy-kids/chromium}
+RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
+STATE_DIR=$RUNTIME_ROOT/omarchy-kids
+LOCK_FILE=$STATE_DIR/browser-protection.lock
+POLICY_FILE=$STATE_DIR/chromium-web-protection.json
+POLICY_DIR=${OMARCHY_KIDS_CHROMIUM_POLICY_DIR:-/etc/chromium/policies/managed}
+PROC_ROOT=${OMARCHY_KIDS_PROC_ROOT:-/proc}
+TEMPLATE=https://family.cloudflare-dns.com/dns-query
+TOKEN=$(printf '%s' "$TEMPLATE" | sha256sum)
+TOKEN=${TOKEN%% *}
+
+emit_error() {
+  jq -nc --arg error "$1" '{configured: false, error: $error}'
+}
+
+fail() {
+  emit_error "$1"
+  exit 1
+}
+
+profile_pid() {
+  local target pid cmdline
+  [[ -L $PROFILE_DIR/SingletonLock ]] || return 1
+  target=$(readlink -- "$PROFILE_DIR/SingletonLock") || return 1
+  pid=${target##*-}
+  [[ $pid =~ ^[1-9][0-9]*$ && -r $PROC_ROOT/$pid/cmdline ]] || return 1
+  cmdline=$(tr '\0' '\n' <"$PROC_ROOT/$pid/cmdline")
+  grep -Fxq -- "--user-data-dir=$PROFILE_DIR" <<<"$cmdline" || return 1
+  printf '%s\n' "$pid"
+}
+
+running_mode_matches() {
+  local pid=$1
+  tr '\0' '\n' <"$PROC_ROOT/$pid/cmdline" \
+    | grep -Fxq -- "--omarchy-kids-web-protection=$TOKEN"
+}
+
+has_conflicting_dns_policy() {
+  local policy
+  shopt -s nullglob
+  for policy in "$POLICY_DIR"/*.json; do
+    if jq -e '
+      type == "object" and
+        (has("DnsOverHttpsMode") or has("DnsOverHttpsTemplates"))
+    ' "$policy" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+[[ $ACTION == apply ]] || fail "Unsupported browser protection action"
+[[ $PROFILE_DIR == /* && $STATE_DIR == /* ]] \
+  || fail "Browser protection paths must be absolute"
+[[ ! -L $PROFILE_DIR ]] || fail "Browser profile directory cannot be a symbolic link"
+[[ ! -L $STATE_DIR ]] || fail "Browser protection state cannot be a symbolic link"
+install -d -m 0700 -- "$PROFILE_DIR" "$STATE_DIR"
+exec 9>"$LOCK_FILE"
+flock 9
+
+if pid=$(profile_pid); then
+  running_mode_matches "$pid" \
+    || fail "Close the existing Kids browser before protected browsing can start"
+  RUNNING=true
+else
+  pid=
+  RUNNING=false
+fi
+
+command -v bwrap >/dev/null 2>&1 \
+  || fail "Bubblewrap is required for protected browsing"
+bwrap --help 2>&1 | grep -Fq -- '--tmp-overlay' \
+  || fail "Bubblewrap does not support temporary policy overlays"
+[[ -d $POLICY_DIR ]] \
+  || fail "Chromium's managed policy directory is unavailable"
+has_conflicting_dns_policy \
+  && fail "An existing Chromium DNS policy prevents Kids web protection"
+[[ ! -L $POLICY_FILE ]] \
+  || fail "Browser protection policy cannot be a symbolic link"
+
+policy_tmp=$(mktemp "$STATE_DIR/.chromium-policy.XXXXXX")
+trap 'rm -f -- "$policy_tmp"' EXIT
+chmod 0600 "$policy_tmp"
+jq -nc --arg template "$TEMPLATE" '{
+  DnsOverHttpsMode: "secure",
+  DnsOverHttpsTemplates: $template
+}' >"$policy_tmp"
+mv -- "$policy_tmp" "$POLICY_FILE"
+trap - EXIT
+
+bwrap \
+  --bind / / \
+  --dev-bind /dev /dev \
+  --proc /proc \
+  --overlay-src "$POLICY_DIR" \
+  --tmp-overlay "$POLICY_DIR" \
+  --ro-bind "$POLICY_FILE" "$POLICY_DIR/omarchy-kids-web-protection.json" \
+  -- jq -e '
+    .DnsOverHttpsMode == "secure"
+      and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
+  ' "$POLICY_DIR/omarchy-kids-web-protection.json" >/dev/null \
+  || fail "Could not create the temporary Chromium policy overlay"
+
+jq -nc \
+  --arg token "$TOKEN" \
+  --arg policyPath "$POLICY_FILE" \
+  --argjson running "$RUNNING" \
+  --argjson pid "${pid:-null}" \
+  '{
+    configured: true,
+    provider: "cloudflare-family",
+    token: $token,
+    policyPath: $policyPath,
+    running: $running,
+    pid: $pid
+  }'

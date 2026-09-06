@@ -9,11 +9,13 @@ EMPTY_MENU="$PLUGIN_ROOT/empty-menu.jsonc"
 WINDOW_SESSION="$PLUGIN_ROOT/window-session"
 SHORTCUT_POLICY="$PLUGIN_ROOT/shortcut-policy"
 LIFECYCLE_CLEANUP="$PLUGIN_ROOT/lifecycle-cleanup"
+BROWSER_PROTECTION="$PLUGIN_ROOT/browser-protection"
 
 bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
   "$PLUGIN_ROOT/test/hyprctl-mock" "$PLUGIN_ROOT/test/keybindings-mock" \
   "$PLUGIN_ROOT/test/window-hyprctl-mock" \
-  "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP"
+  "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP" \
+  "$BROWSER_PROTECTION"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -44,9 +46,9 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.15.8" and
+  .version == "0.16.0" and
   .author == "elgevan" and
-  .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile." and
+  .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
   .entryPoints.barWidget == "BarWidget.qml" and
@@ -62,6 +64,9 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'Cloudflare 1.1.1.1 for Families' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'always enabled for the Kids browser' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'DNS filtering blocks domains' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
     "$PLUGIN_ROOT/README.md" \
@@ -96,6 +101,10 @@ assert.equal(allowlist.parseSettings(JSON.stringify({
 assert.deepEqual(
   allowlist.parseSettings(JSON.stringify({version: 1, allowedDesktopIds: []})),
   []
+)
+assert.deepEqual(
+  JSON.parse(allowlist.settingsText(["omawrite", "chromium"])),
+  {version: 1, allowedDesktopIds: ["chromium", "omawrite"]}
 )
 assert.deepEqual(
   allowlist.filterRows([
@@ -511,37 +520,119 @@ assert.deepEqual(browser.windowClasses(""), ["chromium"])
 assert.deepEqual(browser.windowClasses("https://youtube.com/"), ["chromium", "chrome-youtube.com__-default"])
 assert.deepEqual(browser.windowClasses("https://EXAMPLE.com:8443/watch?v=1#x"), ["chromium", "chrome-example.com__watch-default"])
 assert.deepEqual(browser.windowClasses("not a URL"), ["chromium"])
-assert.deepEqual(browser.launchCommand("/home/kid"), [
+assert.deepEqual(browser.launchCommand("/home/kid"), [])
+assert.deepEqual(browser.launchCommand("/home/kid", "https://youtube.com/", {
+  token: "test-token",
+  policyPath: "/run/user/1000/omarchy-kids/chromium-web-protection.json"
+}), [
   "uwsm-app",
   "--",
+  "/usr/bin/bwrap",
+  "--bind", "/", "/",
+  "--dev-bind", "/dev", "/dev",
+  "--proc", "/proc",
+  "--overlay-src", "/etc/chromium/policies/managed",
+  "--tmp-overlay", "/etc/chromium/policies/managed",
+  "--ro-bind", "/run/user/1000/omarchy-kids/chromium-web-protection.json",
+  "/etc/chromium/policies/managed/omarchy-kids-web-protection.json",
+  "--",
   "/usr/bin/chromium",
+  "--omarchy-kids-web-protection=test-token",
   "--user-data-dir=/home/kid/.local/share/omarchy-kids/chromium",
   "--no-first-run",
   "--no-default-browser-check",
   "--disable-sync",
-  "--new-window"
-])
-assert.deepEqual(browser.launchCommand("/home/kid", "https://youtube.com/"), [
-  "uwsm-app",
-  "--",
-  "/usr/bin/chromium",
-  "--user-data-dir=/home/kid/.local/share/omarchy-kids/chromium",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-sync",
+  "--disable-background-mode",
   "--app=https://youtube.com/"
 ])
 NODE
 
+browser_protection_dir=$(mktemp -d)
+browser_profile=$browser_protection_dir/profile
+browser_runtime=$browser_protection_dir/runtime
+browser_proc=$browser_protection_dir/proc
+browser_policy_dir=$browser_protection_dir/system-policies
+mkdir -p "$browser_policy_dir"
+
+browser_result=$(
+  OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply
+)
+jq -e '
+  .configured == true
+    and .provider == "cloudflare-family"
+    and .running == false
+    and .pid == null
+    and (.token | test("^[0-9a-f]{64}$"))
+' \
+    <<<"$browser_result" >/dev/null \
+  && jq -e '
+    .DnsOverHttpsMode == "secure"
+      and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
+  ' "$browser_runtime/omarchy-kids/chromium-web-protection.json" >/dev/null \
+  || fail "browser protection does not prepare Cloudflare Families policy"
+
+mkdir -p "$browser_proc/4242"
+cloudflare_token=$(jq -r .token <<<"$browser_result")
+printf '%s\0%s\0' /usr/lib/chromium/chromium \
+  "--user-data-dir=$browser_profile" \
+  "--omarchy-kids-web-protection=$cloudflare_token" \
+  >"$browser_proc/4242/cmdline"
+ln -s "test-host-4242" "$browser_profile/SingletonLock"
+browser_result=$(
+  OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$browser_proc" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply
+)
+jq -e '.configured == true and .running == true and .pid == 4242' \
+    <<<"$browser_result" >/dev/null \
+  || fail "browser protection rejects a matching Cloudflare-protected browser"
+printf '%s\0%s\0' /usr/lib/chromium/chromium \
+  "--user-data-dir=$browser_profile" \
+  "--omarchy-kids-web-protection=wrong-token" \
+  >"$browser_proc/4242/cmdline"
+if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$browser_proc" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply \
+    >"$browser_protection_dir/running-mismatch.json"; then
+  fail "browser protection accepts an unprotected running Chromium profile"
+fi
+jq -e '.configured == false and (.error | contains("Close the existing"))' \
+    "$browser_protection_dir/running-mismatch.json" >/dev/null \
+  || fail "browser protection does not fail closed for a running mismatched profile"
+
+rm -f "$browser_profile/SingletonLock"
+printf '%s\n' '{"DnsOverHttpsMode":"off"}' >"$browser_policy_dir/existing-dns.json"
+if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply \
+    >"$browser_protection_dir/conflicting-policy.json"; then
+  fail "browser protection overrides an existing Chromium DNS policy"
+fi
+jq -e '.configured == false and (.error | contains("existing Chromium DNS policy"))' \
+    "$browser_protection_dir/conflicting-policy.json" >/dev/null \
+  || fail "browser protection does not report an existing DNS policy"
+
+rm -rf -- "$browser_protection_dir"
+
 [[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
 [[ -x $SHORTCUT_POLICY ]] || fail "shortcut-policy helper is not executable"
 [[ -x $LIFECYCLE_CLEANUP ]] || fail "lifecycle-cleanup helper is not executable"
+[[ -x $BROWSER_PROTECTION ]] || fail "browser-protection helper is not executable"
 rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q '"cp", "--"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'id: stageRuntimeTools' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'windowSessionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'browserProtectionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
@@ -552,7 +643,7 @@ rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode(root.shortcutPolicyError)' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'function authorizeAppLaunch(desktopId, browserRouted)' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'expectedWindows: root.pendingExpectedWindows()' "$PLUGIN_ROOT/Service.qml" \
-  && rg -Fq 'if (!root.allowlistService.authorizeAppLaunch(desktopId, true)) return' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -Fq 'if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl)) return' "$PLUGIN_ROOT/Menu.qml" \
   && ! rg -Fq 'function guardAppLaunch()' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'if (root.modePhase !== "entering") return' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.beginModeStateRecovery(enabled === false ? "inactive" : "unknown")' "$PLUGIN_ROOT/Service.qml" \

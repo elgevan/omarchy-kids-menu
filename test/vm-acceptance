@@ -98,7 +98,8 @@ plugin_absent() {
 runtime_tools_ready() {
   [[ -x $RUNTIME_TOOL_DIR/window-session \
     && -x $RUNTIME_TOOL_DIR/shortcut-policy \
-    && -x $RUNTIME_TOOL_DIR/lifecycle-cleanup ]]
+    && -x $RUNTIME_TOOL_DIR/lifecycle-cleanup \
+    && -x $RUNTIME_TOOL_DIR/browser-protection ]]
 }
 
 stock_menu_restored() {
@@ -311,6 +312,23 @@ kids_chromium_visible() {
     [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/cmdline ]] || continue
     command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
     [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* ]] && return 0
+  done < <(hyprctl -j clients | jq -r '
+    .[] | select(.workspace.name == "1" and (.class | ascii_downcase) == "chromium") | .pid')
+  return 1
+}
+
+kids_chromium_protected() {
+  local pid command policy
+  policy=/etc/chromium/policies/managed/omarchy-kids-web-protection.json
+  while read -r pid; do
+    [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/cmdline ]] || continue
+    command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+    [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* \
+      && $command == *"--omarchy-kids-web-protection="* ]] || continue
+    jq -e '
+      .DnsOverHttpsMode == "secure"
+        and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
+    ' "/proc/$pid/root$policy" >/dev/null 2>&1 && return 0
   done < <(hyprctl -j clients | jq -r '
     .[] | select(.workspace.name == "1" and (.class | ascii_downcase) == "chromium") | .pid')
   return 1
@@ -575,6 +593,8 @@ if desktop_present YouTube && command -v chromium >/dev/null; then
   sleep 1
   wtype -k Return
   wait_until "YouTube uses the Kids Chromium profile" 20 youtube_window_with_kids_profile
+  wait_until "Kids Chromium receives the temporary family DNS policy" 20 \
+    kids_chromium_protected
   private_workspaces_hidden || fail "YouTube revealed an adult or quarantined workspace"
   kids_launched_address=$(kids_youtube_address)
   [[ $kids_launched_address =~ ^0x[0-9a-fA-F]+$ ]] \

@@ -55,20 +55,39 @@ function windowClasses(appUrl) {
   return classes
 }
 
-function launchCommand(homeDir, appUrl) {
-  var command = [
-    "uwsm-app",
-    "--",
+function launchCommand(homeDir, appUrl, protection) {
+  var options = protection || {}
+  var token = String(options.token || "")
+  var policyPath = String(options.policyPath || "")
+  if (!token || !policyPath) return []
+
+  var chromiumCommand = [
     "/usr/bin/chromium",
+    "--omarchy-kids-web-protection=" + token,
     "--user-data-dir=" + profileDir(homeDir),
     "--no-first-run",
     "--no-default-browser-check",
-    "--disable-sync"
+    "--disable-sync",
+    "--disable-background-mode"
   ]
 
   var url = String(appUrl || "")
-  command.push(url ? "--app=" + url : "--new-window")
-  return command
+  chromiumCommand.push(url ? "--app=" + url : "--new-window")
+
+  var command = [
+    "uwsm-app", "--",
+    "/usr/bin/bwrap",
+    "--bind", "/", "/",
+    "--dev-bind", "/dev", "/dev",
+    "--proc", "/proc",
+    "--overlay-src", "/etc/chromium/policies/managed",
+    "--tmp-overlay", "/etc/chromium/policies/managed",
+    "--ro-bind", policyPath,
+    "/etc/chromium/policies/managed/omarchy-kids-web-protection.json",
+    "--"
+  ]
+
+  return command.concat(chromiumCommand)
 }
 
 if (typeof module !== "undefined") {

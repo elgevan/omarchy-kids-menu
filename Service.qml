@@ -20,6 +20,8 @@ Item {
   property var pluginRegistry: null
   property string omarchyPath: ""
   property var allowedDesktopIds: Allowlist.defaultIds()
+  property string browserProtectionError: ""
+  property var pendingBrowserLaunch: null
   property bool directoryReady: false
   property bool runtimeToolsReady: false
   property bool runtimeToolsFailed: false
@@ -100,6 +102,9 @@ Item {
   readonly property string sourceLifecycleCleanupTool: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) + "/lifecycle-cleanup"
     : ""
+  readonly property string sourceBrowserProtectionTool: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) + "/browser-protection"
+    : ""
   readonly property string windowSessionTool: runtimeToolsReady
     ? runtimeToolDir + "/window-session"
     : ""
@@ -109,6 +114,9 @@ Item {
   readonly property string lifecycleCleanupTool: runtimeToolsReady
     ? runtimeToolDir + "/lifecycle-cleanup"
     : ""
+  readonly property string browserProtectionTool: runtimeToolsReady
+    ? runtimeToolDir + "/browser-protection"
+    : ""
 
   signal allowlistChanged()
   signal kidsModeChanged()
@@ -116,6 +124,7 @@ Item {
   function prepareRuntimeTools() {
     if (!root.directoryReady || !root.sourceWindowSessionTool
         || !root.sourceShortcutPolicyTool || !root.sourceLifecycleCleanupTool
+        || !root.sourceBrowserProtectionTool
         || stageRuntimeTools.running)
       return
 
@@ -126,6 +135,7 @@ Item {
       root.sourceWindowSessionTool,
       root.sourceShortcutPolicyTool,
       root.sourceLifecycleCleanupTool,
+      root.sourceBrowserProtectionTool,
       root.runtimeToolDir
     ]
     stageRuntimeTools.running = true
@@ -414,6 +424,7 @@ Item {
     root.shortcutPolicyError = ""
     root.modePhase = "exiting"
     root.controlReleaseStarted = false
+    root.pendingBrowserLaunch = null
     root.windowSessionDesired = false
     root.windowSessionSynced = false
     // Restore windows before relaxing the menu, shortcut, and DND controls.
@@ -429,6 +440,7 @@ Item {
     root.activationWaitingForTools = false
     root.modePhase = "rollback"
     root.controlReleaseStarted = false
+    root.pendingBrowserLaunch = null
     root.windowSessionDesired = false
     root.windowSessionSynced = false
     if (!root.windowSessionTool) {
@@ -784,6 +796,50 @@ Item {
     if (!root.shortcutAllowed(["chromium", "google-chrome", "google-chrome-stable"]))
       return false
     return root.authorizeWindowClasses(["chromium"])
+  }
+
+  function requestBrowserLaunch(desktopId, appUrl) {
+    if (!root.kidsModeEnabled || root.modePhase !== "active"
+        || !root.browserProtectionTool || browserProtectionApply.running
+        || root.pendingBrowserLaunch)
+      return false
+
+    var id = KidsBrowser.normalizeDesktopId(desktopId)
+    var authorized = id
+      ? root.authorizeAppLaunch(id, true)
+      : root.authorizeBrowserLaunch()
+    if (!authorized) return false
+
+    root.browserProtectionError = ""
+    root.pendingBrowserLaunch = {appUrl: String(appUrl || "")}
+    browserProtectionApply.command = [root.browserProtectionTool, "apply"]
+    browserProtectionApply.running = true
+    return true
+  }
+
+  function finishBrowserProtection(exitCode, output) {
+    var launch = root.pendingBrowserLaunch
+    root.pendingBrowserLaunch = null
+    var result = root.parseWindowSessionOutput(output)
+    if (exitCode !== 0 || !result || result.configured !== true
+        || !result.token || !result.policyPath) {
+      root.browserProtectionError = result && result.error
+        ? String(result.error)
+        : "Could not prepare protected browsing"
+      console.warn("omarchy-kids: browser protection failed with exit code "
+        + exitCode + ": " + root.browserProtectionError)
+      Quickshell.execDetached([
+        "omarchy-notification-send",
+        "Kids browser did not open: " + root.browserProtectionError
+      ])
+      return
+    }
+
+    if (!launch || !root.kidsModeEnabled || root.modePhase !== "active") return
+    Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, launch.appUrl, {
+      token: String(result.token || ""),
+      policyPath: String(result.policyPath || "")
+    }))
   }
 
   function pendingExpectedWindows() {
@@ -1239,6 +1295,15 @@ Item {
     stdout: StdioCollector { id: shortcutPolicyExitOutput; waitForEnd: true }
     onExited: function(exitCode) {
       root.finishShortcutPolicy("exit", exitCode, shortcutPolicyExitOutput.text)
+    }
+  }
+
+  Process {
+    id: browserProtectionApply
+    command: []
+    stdout: StdioCollector { id: browserProtectionOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishBrowserProtection(exitCode, browserProtectionOutput.text)
     }
   }
 

@@ -4,11 +4,14 @@
 
 When Kids Menu is on, a child sees only the apps you choose. Your windows are
 hidden, shortcuts to other apps and settings are paused, and Chromium and
-supported web apps use a separate browser profile.
+supported web apps use a separate browser profile with automatic family web
+protection.
 
 ## Install
 
-Requires Omarchy 4 with the Quattro shell, Chromium, and the standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The plugin does not install packages or download code and requires no elevated privileges.
+Requires Omarchy 4 with the Quattro shell, Chromium, Bubblewrap, and the
+standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The plugin
+does not install packages or download code and requires no elevated privileges.
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable
@@ -34,10 +37,25 @@ The separate browser profile is kept between sessions at:
 ~/.local/share/omarchy-kids/chromium
 ```
 
-Other browsers and apps use their normal profiles. Kids Menu does not filter
-websites and is not a replacement for a separate Linux user or parental
-controls. It is intended for supervised use. The exit check prevents accidental
-access, but software running as the same Linux user can still change the plugin's files or turn it off.
+Cloudflare 1.1.1.1 for Families is always enabled for the Kids browser and
+supported web apps. It blocks domains associated with adult content, malware,
+and phishing. Cloudflare receives the Kids browser's DNS queries. Protection is
+applied as a temporary Chromium policy inside the browser process; the host's
+Chromium policies are preserved and no system policy or DNS setting is changed.
+If secure DNS cannot be enforced, the browser does not launch. Other browsers
+and applications continue using their normal profiles and system DNS.
+
+DNS filtering blocks domains, not individual pages or images on an otherwise
+allowed site. It can misclassify sites and cannot guarantee that all unsuitable
+material is blocked. Kids Menu is not a replacement for a separate Linux user
+or parental controls and is intended for supervised use. The exit check prevents
+accidental access, but software running as the same Linux user can still change
+the plugin's files, browser settings, or turn it off.
+
+The DNS service is operated by a third party. See Cloudflare's documentation
+for filtering and privacy details:
+
+- [Cloudflare 1.1.1.1 for Families](https://developers.cloudflare.com/1.1.1.1/setup/)
 
 ## Remove
 

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.elgevan.kids-menu",
   "name": "Kids Menu",
-  "version": "0.15.8",
+  "version": "0.16.0",
   "author": "elgevan",
   "license": "MIT",
-  "description": "Temporarily switch your Omarchy desktop into a simpler space for a child, with only the apps you choose and a separate, persistent browser profile.",
+  "description": "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection.",
   "kinds": [
     "menu",
     "bar-widget",

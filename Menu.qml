@@ -86,10 +86,9 @@ Loader {
       // one persistent, login-free Chromium profile. This prevents a web-app
       // shortcut such as YouTube from falling through to the adult profile.
       if (KidsBrowser.isBrowser(desktopId) || webAppUrl) {
-        if (!root.allowlistService.authorizeAppLaunch(desktopId, true)) return
+        if (!root.allowlistService.requestBrowserLaunch(desktopId, webAppUrl)) return
         if (typeof root.sourceAppLibrary.beginLaunchFeedback === "function")
           root.sourceAppLibrary.beginLaunchFeedback(name)
-        Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, webAppUrl))
         return
       }
 
@@ -143,9 +142,7 @@ Loader {
 
   function launchKidsBrowser() {
     if (!root.kidsModeActive) return "inactive"
-    if (!root.allowlistService.authorizeBrowserLaunch()) return "blocked"
-    Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, ""))
-    return "ok"
+    return root.allowlistService.requestBrowserLaunch("", "") ? "ok" : "blocked"
   }
 
   function launchAllowedApp(payloadJson) {

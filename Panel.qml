@@ -173,7 +173,7 @@ Panel {
         ? "Use your password or fingerprint to restore " + root.service.hiddenWindowCount + " windows"
         : "Use your password or fingerprint to return to your desktop"
     }
-    return "Show only chosen apps and mute notifications"
+    return "Chosen apps, muted notifications, and protected web browsing"
   }
 
   ListModel { id: appModel }
@@ -237,6 +237,8 @@ Panel {
                 ? root.service.windowSessionError
                 : root.service && root.service.shortcutPolicyError.length > 0
                   ? root.service.shortcutPolicyError
+                  : root.service && root.service.browserProtectionError.length > 0
+                    ? root.service.browserProtectionError
                   : ""
             visible: text.length > 0
             color: root.dim
