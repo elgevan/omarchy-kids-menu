@@ -147,6 +147,17 @@ function isAllowedVisiblePlugin(id, pluginId) {
   return KIDS_CONTROL_IDS.indexOf(key) !== -1
 }
 
+function isExemptPlugin(id, exemptPluginIds) {
+  var key = String(id || "")
+  return key !== STOCK_MENU_ID && key.length > 0
+    && arrayContains(exemptPluginIds, key)
+}
+
+function isVisiblePluginAllowed(id, pluginId, exemptPluginIds) {
+  return isAllowedVisiblePlugin(id, pluginId)
+    || isExemptPlugin(id, exemptPluginIds)
+}
+
 function manifestHasVisibleSurface(manifest) {
   var kinds = manifest && Array.isArray(manifest.kinds) ? manifest.kinds : []
   for (var i = 0; i < VISIBLE_PLUGIN_KINDS.length; i++) {
@@ -155,11 +166,31 @@ function manifestHasVisibleSurface(manifest) {
   return false
 }
 
-function hiddenPluginIds(installedPlugins, pluginId) {
+function exemptablePluginOptions(installedPlugins, pluginId) {
+  if (!isObject(installedPlugins)) return []
+  var options = []
+  for (var id in installedPlugins) {
+    var manifest = installedPlugins[id]
+    if (id === STOCK_MENU_ID || isAllowedVisiblePlugin(id, pluginId)
+        || !manifestHasVisibleSurface(manifest))
+      continue
+    options.push({
+      id: String(id),
+      label: String(manifest && manifest.name ? manifest.name : id)
+    })
+  }
+  options.sort(function(left, right) {
+    var byLabel = left.label.localeCompare(right.label)
+    return byLabel !== 0 ? byLabel : left.id.localeCompare(right.id)
+  })
+  return options
+}
+
+function hiddenPluginIds(installedPlugins, pluginId, exemptPluginIds) {
   if (!isObject(installedPlugins)) return [STOCK_MENU_ID]
   var hidden = []
   for (var id in installedPlugins) {
-    if (!isAllowedVisiblePlugin(id, pluginId)
+    if (!isVisiblePluginAllowed(id, pluginId, exemptPluginIds)
         && manifestHasVisibleSurface(installedPlugins[id]))
       hidden.push(String(id))
   }
@@ -167,17 +198,29 @@ function hiddenPluginIds(installedPlugins, pluginId) {
   return hidden
 }
 
-function applyKidsPluginPolicy(config, installedPlugins, pluginId) {
+function applyKidsPluginPolicy(config, installedPlugins, pluginId,
+                               exemptPluginIds, restore) {
   ensureConfigShape(config)
-  config.plugins = config.plugins.filter(function(entry) {
-    return isAllowedVisiblePlugin(entryId(entry), pluginId)
-  })
+  var originalPlugins = restore && Array.isArray(restore.plugins)
+    ? restore.plugins : config.plugins
+  config.plugins = originalPlugins.filter(function(entry) {
+    return isVisiblePluginAllowed(entryId(entry), pluginId, exemptPluginIds)
+  }).map(cloneJson)
 
-  var disabled = Array.isArray(config.disabledPlugins)
-    ? config.disabledPlugins.map(function(id) { return String(id) })
+  var originallyDisabled = restore && Array.isArray(restore.disabledPlugins)
+    ? restore.disabledPlugins.map(function(id) { return String(id) })
     : []
+  var disabled = restore && (restore.disabledPlugins === null
+      || Array.isArray(restore.disabledPlugins))
+    ? originallyDisabled.slice()
+    : Array.isArray(config.disabledPlugins)
+      ? config.disabledPlugins.map(function(id) { return String(id) })
+      : []
   disabled = disabled.filter(function(id) {
-    return !isAllowedVisiblePlugin(id, pluginId)
+    if (isAllowedVisiblePlugin(id, pluginId)) return false
+    if (isExemptPlugin(id, exemptPluginIds))
+      return originallyDisabled.indexOf(id) !== -1
+    return true
   })
 
   if (isObject(installedPlugins)) {
@@ -186,7 +229,7 @@ function applyKidsPluginPolicy(config, installedPlugins, pluginId) {
       if (manifest && manifest.__isFirstParty === true
           && manifestHasVisibleSurface(manifest)
           && KIDS_SERVICE_IDS.indexOf(String(id)) === -1
-          && !isAllowedVisiblePlugin(id, pluginId)
+          && !isVisiblePluginAllowed(id, pluginId, exemptPluginIds)
           && disabled.indexOf(String(id)) === -1)
         disabled.push(String(id))
     }
@@ -195,7 +238,8 @@ function applyKidsPluginPolicy(config, installedPlugins, pluginId) {
   config.disabledPlugins = disabled
 }
 
-function kidsPluginPolicyMatches(config, installedPlugins, pluginId, managerId) {
+function kidsPluginPolicyMatches(config, installedPlugins, pluginId, managerId,
+                                 exemptPluginIds) {
   if (!isObject(config) || !isObject(config.bar) || !isObject(config.bar.layout))
     return false
 
@@ -204,21 +248,33 @@ function kidsPluginPolicyMatches(config, installedPlugins, pluginId, managerId) 
       || !Array.isArray(layout.right))
     return false
 
-  var left = layout.left.map(entryId)
-  var right = layout.right.map(entryId)
-  if (left.length !== 2 || left[0] !== pluginId
-      || (left[1] !== WORKSPACES_ID && !/[.]workspaces$/.test(left[1])))
-    return false
-  if (layout.center.length !== 0) return false
-
-  var expectedRight = [managerId].concat(KIDS_CONTROL_IDS)
-  if (right.length !== expectedRight.length) return false
-  for (var r = 0; r < expectedRight.length; r++)
-    if (right[r] !== expectedRight[r]) return false
+  var pluginLocation = barLocation(config, pluginId)
+  var restore = pluginLocation && isObject(pluginLocation.entry)
+    ? normalizedBarRestore(pluginLocation.entry[BAR_RESTORE_KEY])
+    : null
+  if (!restore) return false
+  var expectedLayout = kidsBarLayout(
+    restore, pluginId, managerId, "", exemptPluginIds)
+  var sections = ["left", "center", "right"]
+  for (var s = 0; s < sections.length; s++) {
+    var section = sections[s]
+    var actualIds = layout[section].map(entryId)
+    var expectedIds = expectedLayout[section].map(entryId)
+    if (actualIds.length !== expectedIds.length) return false
+    for (var e = 0; e < expectedIds.length; e++)
+      if (actualIds[e] !== expectedIds[e]) return false
+  }
 
   var plugins = Array.isArray(config.plugins) ? config.plugins : []
-  for (var p = 0; p < plugins.length; p++)
-    if (!isAllowedVisiblePlugin(entryId(plugins[p]), pluginId)) return false
+  var expectedPlugins = Array.isArray(restore.plugins)
+    ? restore.plugins.filter(function(entry) {
+        return isVisiblePluginAllowed(entryId(entry), pluginId, exemptPluginIds)
+      })
+    : []
+  if (plugins.length !== expectedPlugins.length) return false
+  for (var p = 0; p < plugins.length; p++) {
+    if (entryId(plugins[p]) !== entryId(expectedPlugins[p])) return false
+  }
 
   var disabled = Array.isArray(config.disabledPlugins)
     ? config.disabledPlugins.map(function(id) { return String(id) })
@@ -227,13 +283,25 @@ function kidsPluginPolicyMatches(config, installedPlugins, pluginId, managerId) 
   for (var c = 0; c < KIDS_CONTROL_IDS.length; c++)
     if (disabled.indexOf(KIDS_CONTROL_IDS[c]) !== -1) return false
 
+  var originallyDisabled = Array.isArray(restore.disabledPlugins)
+    ? restore.disabledPlugins.map(function(id) { return String(id) })
+    : []
+  var exemptions = Array.isArray(exemptPluginIds) ? exemptPluginIds : []
+  for (var x = 0; x < exemptions.length; x++) {
+    var exemptId = String(exemptions[x])
+    if (exemptId !== STOCK_MENU_ID
+        && originallyDisabled.indexOf(exemptId) === -1
+        && disabled.indexOf(exemptId) !== -1)
+      return false
+  }
+
   if (isObject(installedPlugins)) {
     for (var id in installedPlugins) {
       var manifest = installedPlugins[id]
       if (manifest && manifest.__isFirstParty === true
           && manifestHasVisibleSurface(manifest)
           && KIDS_SERVICE_IDS.indexOf(String(id)) === -1
-          && !isAllowedVisiblePlugin(id, pluginId)
+          && !isVisiblePluginAllowed(id, pluginId, exemptPluginIds)
           && disabled.indexOf(String(id)) === -1)
         return false
     }
@@ -241,19 +309,54 @@ function kidsPluginPolicyMatches(config, installedPlugins, pluginId, managerId) 
   return true
 }
 
-function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore) {
+function appendExemptBarEntries(layout, restore, pluginId, exemptPluginIds) {
+  var sections = ["left", "center", "right"]
+  var present = ({})
+  for (var s = 0; s < sections.length; s++) {
+    var current = layout[sections[s]]
+    for (var i = 0; i < current.length; i++) present[entryId(current[i])] = true
+  }
+
+  for (var r = 0; r < sections.length; r++) {
+    var section = sections[r]
+    var entries = restore[section]
+    for (var e = 0; e < entries.length; e++) {
+      var id = entryId(entries[e])
+      if (!present[id] && isExemptPlugin(id, exemptPluginIds)
+          && id !== pluginId) {
+        layout[section].push(cloneJson(entries[e]))
+        present[id] = true
+      }
+    }
+  }
+}
+
+function kidsBarLayout(restore, pluginId, managerId, managerPath,
+                       exemptPluginIds) {
+  var layout = {
+    left: [{id: pluginId}, workspacesEntryFromLayout(restore)],
+    center: [],
+    right: [managerEntry(managerId, managerPath)]
+  }
+  for (var i = 0; i < KIDS_CONTROL_IDS.length; i++)
+    layout.right.push(entryFromLayout(restore, KIDS_CONTROL_IDS[i]))
+  appendExemptBarEntries(layout, restore, pluginId, exemptPluginIds)
+  return layout
+}
+
+function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore,
+                            exemptPluginIds) {
   var pluginLocation = barLocation(config, pluginId)
+  var layout = kidsBarLayout(
+    restore, pluginId, managerId, managerPath, exemptPluginIds)
   var pluginEntry = pluginLocation && isObject(pluginLocation.entry)
-    ? cloneJson(pluginLocation.entry)
-    : { id: pluginId }
+    ? cloneJson(pluginLocation.entry) : layout.left[0]
   pluginEntry.id = pluginId
   pluginEntry[BAR_RESTORE_KEY] = cloneJson(restore)
-
-  config.bar.layout.left = [pluginEntry, workspacesEntryFromLayout(restore)]
-  config.bar.layout.center = []
-  config.bar.layout.right = [managerEntry(managerId, managerPath)]
-  for (var i = 0; i < KIDS_CONTROL_IDS.length; i++)
-    config.bar.layout.right.push(entryFromLayout(restore, KIDS_CONTROL_IDS[i]))
+  layout.left[0] = pluginEntry
+  config.bar.layout.left = layout.left
+  config.bar.layout.center = layout.center
+  config.bar.layout.right = layout.right
 }
 
 function restoreBarLayout(config, restore, pluginId) {
@@ -297,7 +400,8 @@ function ensureManager(config, managerId, managerPath) {
 // also replace the rest of the bar with the small controls allowlist. Both
 // restore records travel with the plugin entry so a shell reload cannot lose
 // the user's exact normal layout or the stock menu's original slot.
-function activate(config, pluginId, managerId, managerPath, kidsModeEnabled, installedPlugins) {
+function activate(config, pluginId, managerId, managerPath, kidsModeEnabled,
+                  installedPlugins, exemptPluginIds) {
   ensureConfigShape(config)
   var pluginLocation = barLocation(config, pluginId)
   if (!pluginLocation) return { restore: null }
@@ -343,8 +447,10 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled, ins
   ensureManager(config, managerId, managerPath)
   if (kidsModeEnabled === true) {
     if (!barRestore) barRestore = barLayoutSnapshot(config)
-    applyKidsBarLayout(config, pluginId, managerId, managerPath, barRestore)
-    applyKidsPluginPolicy(config, installedPlugins, pluginId)
+    applyKidsBarLayout(config, pluginId, managerId, managerPath, barRestore,
+      exemptPluginIds)
+    applyKidsPluginPolicy(config, installedPlugins, pluginId, exemptPluginIds,
+      barRestore)
   } else if (barRestore) {
     restoreBarLayout(config, barRestore, pluginId)
     ensureManager(config, managerId, managerPath)
@@ -396,10 +502,15 @@ if (typeof module !== "undefined") {
     barLayoutSnapshot: barLayoutSnapshot,
     workspacesEntryFromLayout: workspacesEntryFromLayout,
     isAllowedVisiblePlugin: isAllowedVisiblePlugin,
+    isExemptPlugin: isExemptPlugin,
+    isVisiblePluginAllowed: isVisiblePluginAllowed,
     manifestHasVisibleSurface: manifestHasVisibleSurface,
+    exemptablePluginOptions: exemptablePluginOptions,
     hiddenPluginIds: hiddenPluginIds,
     applyKidsPluginPolicy: applyKidsPluginPolicy,
     kidsPluginPolicyMatches: kidsPluginPolicyMatches,
+    appendExemptBarEntries: appendExemptBarEntries,
+    kidsBarLayout: kidsBarLayout,
     activate: activate,
     deactivate: deactivate
   }

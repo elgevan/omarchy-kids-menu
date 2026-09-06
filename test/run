@@ -46,7 +46,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.18.0" and
+  .version == "0.19.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -67,6 +67,8 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
   && rg -Fq 'Cloudflare 1.1.1.1 for Families' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Open the gearbox in the Kids Menu panel' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Family or AdGuard Family instead.' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'The gearbox also lists installed plugins' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'only exempt plugins you trust a child to use' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'DNS filtering blocks domains' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
@@ -135,15 +137,27 @@ assert.equal(preferences.parseSettings(JSON.stringify({version: 1,
   browserProtectionProvider: "unknown"})), null)
 assert.deepEqual(preferences.parseSettings(JSON.stringify({version: 1,
   browserProtectionProvider: "cleanbrowsing-family"})), {
-  browserProtectionProvider: "cleanbrowsing-family"
+  browserProtectionProvider: "cleanbrowsing-family",
+  exemptPluginIds: []
 })
-assert.deepEqual(JSON.parse(preferences.settingsText("adguard-family")), {
+assert.equal(preferences.parseSettings(JSON.stringify({version: 1,
+  browserProtectionProvider: "cloudflare-family",
+  exemptPluginIds: Array.from({length: 129}, (_, index) => `plugin-${index}`)
+})), null)
+assert.deepEqual(preferences.normalizePluginIds([
+  " third.party.clock ", "third.party.clock", "third.party.notes", ""
+]), ["third.party.clock", "third.party.notes"])
+assert.deepEqual(JSON.parse(preferences.settingsText("adguard-family", [
+  "third.party.notes", "third.party.clock", "third.party.notes"
+])), {
   version: 1,
-  browserProtectionProvider: "adguard-family"
+  browserProtectionProvider: "adguard-family",
+  exemptPluginIds: ["third.party.clock", "third.party.notes"]
 })
 assert.deepEqual(JSON.parse(preferences.settingsText("unknown")), {
   version: 1,
-  browserProtectionProvider: "cloudflare-family"
+  browserProtectionProvider: "cloudflare-family",
+  exemptPluginIds: []
 })
 NODE
 
@@ -433,6 +447,107 @@ assert.deepEqual(
   [managerId, "third.party.widget", "omarchy.audio"]
 )
 
+const exemptableIds = integration.exemptablePluginOptions(
+  installedPlugins, pluginId).map(option => option.id)
+assert.equal(exemptableIds.includes("omarchy.menu"), false)
+assert.equal(exemptableIds.includes("omarchy.audio"), false)
+assert.equal(exemptableIds.includes(pluginId), false)
+assert.equal(exemptableIds.includes("omarchy.clock"), true)
+assert.equal(exemptableIds.includes("omarchy.media"), true)
+assert.equal(exemptableIds.includes("third.party.panel"), true)
+assert.equal(exemptableIds.includes("third.party.widget"), true)
+
+const exemptions = [
+  "omarchy.clock", "omarchy.media", "third.party.panel",
+  "third.party.widget", "omarchy.menu"
+]
+const exemptionConfig = {
+  version: 1,
+  bar: {
+    layout: {
+      left: [{id: "omarchy.menu"}, {id: "eelg.workspaces"}, {id: pluginId}],
+      center: [{id: "omarchy.clock", format: "HH:mm"}],
+      right: [{id: "third.party.widget", compact: true}, {id: "omarchy.audio"}]
+    }
+  },
+  plugins: [{id: "third.party.panel", setting: "preserved"}],
+  disabledPlugins: ["omarchy.audio", "omarchy.emojis", "omarchy.media"]
+}
+result = integration.activate(
+  exemptionConfig, pluginId, managerId, managerPath, true,
+  installedPlugins, exemptions)
+assert.deepEqual(exemptionConfig.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+assert.deepEqual(
+  exemptionConfig.bar.layout.left.map(integration.entryId),
+  [pluginId, "eelg.workspaces"]
+)
+assert.deepEqual(exemptionConfig.bar.layout.center, [
+  {id: "omarchy.clock", format: "HH:mm"}
+])
+assert.deepEqual(
+  exemptionConfig.bar.layout.right.map(integration.entryId),
+  [managerId, ...integration.KIDS_CONTROL_IDS, "third.party.widget"]
+)
+assert.deepEqual(exemptionConfig.bar.layout.right.at(-1), {
+  id: "third.party.widget", compact: true
+})
+assert.deepEqual(exemptionConfig.disabledPlugins.slice().sort(), [
+  "omarchy.clipboard", "omarchy.emojis", "omarchy.hybrid", "omarchy.media",
+  "omarchy.menu", "omarchy.osd"
+])
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+assert.deepEqual(integration.hiddenPluginIds(
+  installedPlugins, pluginId, exemptions).slice().sort(), [
+  "omarchy.clipboard", "omarchy.hybrid", "omarchy.menu", "omarchy.osd"
+])
+
+exemptionConfig.bar.layout.right.pop()
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+result = integration.activate(
+  exemptionConfig, pluginId, managerId, managerPath, true,
+  installedPlugins, exemptions)
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+
+exemptionConfig.plugins = []
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+result = integration.activate(
+  exemptionConfig, pluginId, managerId, managerPath, true,
+  installedPlugins, exemptions)
+assert.deepEqual(exemptionConfig.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+
+exemptionConfig.disabledPlugins.push("omarchy.clock")
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+integration.applyKidsPluginPolicy(
+  exemptionConfig, installedPlugins, pluginId, exemptions, result.barRestore)
+assert.equal(integration.kidsPluginPolicyMatches(
+  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+
+result = integration.activate(
+  exemptionConfig, pluginId, managerId, managerPath, false,
+  installedPlugins, exemptions)
+assert.deepEqual(exemptionConfig.plugins, [
+  {id: "third.party.panel", setting: "preserved"}
+])
+assert.deepEqual(exemptionConfig.disabledPlugins,
+  ["omarchy.audio", "omarchy.emojis", "omarchy.media"])
+assert.deepEqual(exemptionConfig.bar.layout.center, [
+  {id: "omarchy.clock", format: "HH:mm"}
+])
+assert.deepEqual(exemptionConfig.bar.layout.right, [
+  {id: managerId, type: "qml", source: managerPath},
+  {id: "third.party.widget", compact: true},
+  {id: "omarchy.audio"}
+])
+
 const policyRemovalConfig = {
   version: 1,
   bar: {
@@ -689,6 +804,8 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -q 'browserProtectionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'tooltipText: "Kids Menu settings"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'text: "KEEP PLUGINS AVAILABLE"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'installedPlugins, root.pluginId, root.exemptPluginIds' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \

@@ -22,6 +22,8 @@ Item {
   property string omarchyPath: ""
   property var allowedDesktopIds: Allowlist.defaultIds()
   property string browserProtectionProvider: Preferences.DEFAULT_BROWSER_PROTECTION_PROVIDER
+  property var exemptPluginIds: []
+  property var exemptPluginOptions: []
   property string browserProtectionError: ""
   property var pendingBrowserLaunch: null
   property bool preferencesLoaded: false
@@ -227,7 +229,9 @@ Item {
     root.browserProtectionProvider = values
       ? values.browserProtectionProvider
       : Preferences.DEFAULT_BROWSER_PROTECTION_PROVIDER
+    root.exemptPluginIds = values ? values.exemptPluginIds : []
     root.preferencesLoaded = true
+    root.refreshExemptPluginOptions()
   }
 
   function persistPreferences() {
@@ -242,7 +246,8 @@ Item {
   function flushPreferencesWrite() {
     if (!root.preferencesWritePending) return
     root.preferencesWritePending = false
-    preferencesFile.setText(Preferences.settingsText(root.browserProtectionProvider))
+    preferencesFile.setText(Preferences.settingsText(
+      root.browserProtectionProvider, root.exemptPluginIds))
   }
 
   function setBrowserProtectionProvider(providerId) {
@@ -252,6 +257,46 @@ Item {
     root.browserProtectionProvider = provider
     root.persistPreferences()
     return true
+  }
+
+  function refreshExemptPluginOptions() {
+    var installedPlugins = root.pluginRegistry
+      ? root.pluginRegistry.installedPlugins
+      : null
+    root.exemptPluginOptions = ShellIntegration.exemptablePluginOptions(
+      installedPlugins, root.pluginId)
+  }
+
+  function isPluginExempt(pluginId) {
+    return Preferences.normalizePluginIds(root.exemptPluginIds)
+      .indexOf(String(pluginId || "")) !== -1
+  }
+
+  function setPluginExempt(pluginId, exempt) {
+    if (!root.settingsEditable) return false
+    var id = String(pluginId || "")
+    var available = false
+    for (var option = 0; option < root.exemptPluginOptions.length; option++) {
+      if (root.exemptPluginOptions[option].id === id) {
+        available = true
+        break
+      }
+    }
+    if (!available) return false
+
+    var next = Preferences.normalizePluginIds(root.exemptPluginIds)
+    var index = next.indexOf(id)
+    if (exempt && index < 0) next.push(id)
+    else if (!exempt && index >= 0) next.splice(index, 1)
+    else return false
+
+    root.exemptPluginIds = Preferences.normalizePluginIds(next)
+    root.persistPreferences()
+    return true
+  }
+
+  function togglePluginExempt(pluginId) {
+    return root.setPluginExempt(pluginId, !root.isPluginExempt(pluginId))
   }
 
   function loadModeState(rawText) {
@@ -1083,7 +1128,8 @@ Item {
       root.shell.shellConfig,
       installedPlugins,
       root.pluginId,
-      root.managerWidgetId
+      root.managerWidgetId,
+      root.exemptPluginIds
     )
   }
 
@@ -1120,7 +1166,7 @@ Item {
         : null
       if (root.modeEffectsDesired && typeof root.shell.hide === "function") {
         var hiddenPluginIds = ShellIntegration.hiddenPluginIds(
-          installedPlugins, root.pluginId)
+          installedPlugins, root.pluginId, root.exemptPluginIds)
         for (var i = 0; i < hiddenPluginIds.length; i++)
           root.shell.hide(hiddenPluginIds[i])
       }
@@ -1134,7 +1180,8 @@ Item {
             root.managerWidgetId,
             root.managerWidgetPath,
             root.modeEffectsDesired,
-            installedPlugins
+            installedPlugins,
+            root.exemptPluginIds
           )
           if (result && result.restore) root.stockMenuRestore = result.restore
           root.barLayoutRestore = result && result.barRestore
@@ -1441,13 +1488,17 @@ Item {
   }
   Connections {
     target: root.pluginRegistry
-    function onPluginsChanged() { root.scheduleShellPolicyVerification() }
+    function onPluginsChanged() {
+      root.refreshExemptPluginOptions()
+      root.scheduleShellPolicyVerification()
+    }
   }
   Connections {
     target: Hyprland
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
   onManifestChanged: {
+    root.refreshExemptPluginOptions()
     root.scheduleShellIntegration()
     root.prepareRuntimeTools()
   }
@@ -1458,6 +1509,7 @@ Item {
   }
 
   Component.onCompleted: {
+    root.refreshExemptPluginOptions()
     ensureDirectory.running = true
     root.scheduleShellIntegration()
     root.scheduleNotificationSetup()

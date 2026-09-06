@@ -36,6 +36,22 @@ function normalizeBrowserProtectionProvider(value) {
   return DEFAULT_BROWSER_PROTECTION_PROVIDER
 }
 
+function normalizePluginIds(values) {
+  var source = Array.isArray(values) ? values : []
+  var seen = ({})
+  var result = []
+
+  for (var i = 0; i < source.length; i++) {
+    var id = String(source[i] || "").trim()
+    if (!id || id.length > 256 || seen[id]) continue
+    seen[id] = true
+    result.push(id)
+  }
+
+  result.sort()
+  return result
+}
+
 function parseSettings(rawText) {
   var text = String(rawText || "").trim()
   if (!text || text.length > 65536) return null
@@ -45,9 +61,17 @@ function parseSettings(rawText) {
     if (parsed && parsed.version === 1
         && typeof parsed.browserProtectionProvider === "string"
         && normalizeBrowserProtectionProvider(parsed.browserProtectionProvider)
-          === parsed.browserProtectionProvider) {
+          === parsed.browserProtectionProvider
+        && (parsed.exemptPluginIds === undefined
+          || (Array.isArray(parsed.exemptPluginIds)
+            && parsed.exemptPluginIds.length <= 128
+            && parsed.exemptPluginIds.every(function(value) {
+              return typeof value === "string" && value.length > 0
+                && value.length <= 256
+            })))) {
       return {
-        browserProtectionProvider: parsed.browserProtectionProvider
+        browserProtectionProvider: parsed.browserProtectionProvider,
+        exemptPluginIds: normalizePluginIds(parsed.exemptPluginIds)
       }
     }
   } catch (error) {
@@ -56,11 +80,12 @@ function parseSettings(rawText) {
   return null
 }
 
-function settingsText(browserProtectionProvider) {
+function settingsText(browserProtectionProvider, exemptPluginIds) {
   return JSON.stringify({
     version: 1,
     browserProtectionProvider: normalizeBrowserProtectionProvider(
-      browserProtectionProvider)
+      browserProtectionProvider),
+    exemptPluginIds: normalizePluginIds(exemptPluginIds)
   }, null, 2) + "\n"
 }
 
@@ -70,6 +95,7 @@ if (typeof module !== "undefined") {
     BROWSER_PROTECTION_PROVIDERS: BROWSER_PROTECTION_PROVIDERS,
     browserProtectionProviders: browserProtectionProviders,
     normalizeBrowserProtectionProvider: normalizeBrowserProtectionProvider,
+    normalizePluginIds: normalizePluginIds,
     parseSettings: parseSettings,
     settingsText: settingsText
   }

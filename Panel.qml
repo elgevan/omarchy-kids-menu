@@ -795,7 +795,7 @@ Panel {
             readonly property bool selected: root.service
               && root.service.browserProtectionProvider === modelData.id
             width: settingsPage.width
-            height: Style.space(66)
+            height: Style.space(58)
             radius: Style.cornerRadius
             opacity: root.service && root.service.settingsEditable ? 1 : 0.55
             color: selected
@@ -869,6 +869,134 @@ Panel {
               cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
               onClicked: root.service.setBrowserProtectionProvider(
                 providerOption.modelData.id)
+            }
+          }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(7)
+
+        Text {
+          text: "KEEP PLUGINS AVAILABLE"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          text: "Selected plugins stay usable in Kids Menu. Only choose plugins you trust a child to use."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
+
+        Text {
+          visible: !root.service || root.service.exemptPluginOptions.length === 0
+          width: parent.width
+          text: "No additional visible plugins are installed."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          wrapMode: Text.WordWrap
+        }
+
+        ListView {
+          id: pluginOptions
+          visible: root.service && root.service.exemptPluginOptions.length > 0
+          width: parent.width
+          height: Style.space(170)
+          model: root.service ? root.service.exemptPluginOptions : []
+          spacing: Style.space(6)
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+
+          delegate: BorderSurface {
+            id: pluginOption
+            required property var modelData
+            readonly property bool selected: root.service
+              && root.service.isPluginExempt(modelData.id)
+            width: pluginOptions.width
+            height: Style.space(54)
+            radius: Style.cornerRadius
+            opacity: root.service && root.service.settingsEditable ? 1 : 0.55
+            color: selected
+              ? Style.selectedFillFor(root.accent, root.accent)
+              : pluginMouse.containsMouse
+                ? Style.hoverFillFor(root.accent, root.accent)
+                : Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec(
+              selected ? "selected" : "normal",
+              selected ? root.accent : root.foreground,
+              root.accent
+            )
+
+            BorderSurface {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(20)
+              height: width
+              radius: Style.space(4)
+              color: pluginOption.selected ? root.accent : "transparent"
+              borderSpec: Border.controlSpec(
+                pluginOption.selected ? "selected" : "normal",
+                pluginOption.selected ? root.accent : root.foreground,
+                root.accent
+              )
+
+              Text {
+                visible: pluginOption.selected
+                anchors.centerIn: parent
+                text: "✓"
+                color: Color.background
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+            }
+
+            Column {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(44)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                text: pluginOption.modelData.label
+                color: pluginOption.selected ? root.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                text: pluginOption.modelData.id
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+
+            MouseArea {
+              id: pluginMouse
+              anchors.fill: parent
+              enabled: root.service && root.service.settingsEditable
+              hoverEnabled: true
+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: root.service.togglePluginExempt(pluginOption.modelData.id)
             }
           }
         }

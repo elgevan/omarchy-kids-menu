@@ -51,6 +51,12 @@ launch. Other browsers and applications continue using their normal profiles
 and system DNS. Changing providers may require closing an already-running Kids
 browser before it can reopen with the new policy.
 
+The gearbox also lists installed plugins that Kids Menu would normally hide.
+Select a plugin there to keep its panels, overlays, and bar widget available
+while Kids Menu is active. Exempt plugins can expose settings or launch other
+software, so only exempt plugins you trust a child to use. The normal Omarchy
+menu cannot be exempted because it would bypass the selected-app list.
+
 DNS filtering blocks domains, not individual pages or images on an otherwise
 allowed site. It can misclassify sites and cannot guarantee that all unsuitable
 material is blocked. Kids Menu is not a replacement for a separate Linux user
