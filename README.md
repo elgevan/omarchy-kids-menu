@@ -38,13 +38,18 @@ The separate browser profile is kept between sessions at:
 ~/.local/share/omarchy-kids/chromium
 ```
 
-Cloudflare 1.1.1.1 for Families is always enabled for the Kids browser and
-supported web apps. It blocks domains associated with adult content, malware,
-and phishing. Cloudflare receives the Kids browser's DNS queries. Protection is
-applied as a temporary Chromium policy inside the browser process; the host's
-Chromium policies are preserved and no system policy or DNS setting is changed.
-If secure DNS cannot be enforced, the browser does not launch. Other browsers
-and applications continue using their normal profiles and system DNS.
+Cloudflare 1.1.1.1 for Families protects the Kids browser and supported web apps
+by default. Open the gearbox in the Kids Menu panel to select CleanBrowsing
+Family or AdGuard Family instead. All three options work without an account and
+block adult content and malicious domains; their additional filtering differs.
+The selected provider receives the Kids browser's DNS queries.
+
+Protection is applied as a temporary Chromium policy inside the browser
+process; the host's Chromium policies are preserved and no system policy or DNS
+setting is changed. If secure DNS cannot be enforced, the browser does not
+launch. Other browsers and applications continue using their normal profiles
+and system DNS. Changing providers may require closing an already-running Kids
+browser before it can reopen with the new policy.
 
 DNS filtering blocks domains, not individual pages or images on an otherwise
 allowed site. It can misclassify sites and cannot guarantee that all unsuitable
@@ -53,10 +58,12 @@ or parental controls and is intended for supervised use. The exit check prevents
 accidental access, but software running as the same Linux user can still change
 the plugin's files, browser settings, or turn it off.
 
-The DNS service is operated by a third party. See Cloudflare's documentation
-for filtering and privacy details:
+The DNS services are operated by third parties. See each provider's
+documentation for filtering and privacy details:
 
 - [Cloudflare 1.1.1.1 for Families](https://developers.cloudflare.com/1.1.1.1/setup/)
+- [CleanBrowsing Family Filter](https://cleanbrowsing.org/filters/)
+- [AdGuard Family Protection](https://adguard-dns.io/en/public-dns.html)
 
 ## Remove
 

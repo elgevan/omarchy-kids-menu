@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 ACTION=${1:-}
+PROVIDER=${2:-cloudflare-family}
 PROFILE_DIR=${OMARCHY_KIDS_BROWSER_PROFILE:-$HOME/.local/share/omarchy-kids/chromium}
 RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
 STATE_DIR=$RUNTIME_ROOT/omarchy-kids
@@ -10,7 +11,20 @@ LOCK_FILE=$STATE_DIR/browser-protection.lock
 POLICY_FILE=$STATE_DIR/chromium-web-protection.json
 POLICY_DIR=${OMARCHY_KIDS_CHROMIUM_POLICY_DIR:-/etc/chromium/policies/managed}
 PROC_ROOT=${OMARCHY_KIDS_PROC_ROOT:-/proc}
-TEMPLATE=https://family.cloudflare-dns.com/dns-query
+case $PROVIDER in
+  cloudflare-family)
+    TEMPLATE=https://family.cloudflare-dns.com/dns-query
+    ;;
+  cleanbrowsing-family)
+    TEMPLATE=https://doh.cleanbrowsing.org/doh/family-filter/
+    ;;
+  adguard-family)
+    TEMPLATE=https://family.adguard-dns.com/dns-query
+    ;;
+  *)
+    TEMPLATE=
+    ;;
+esac
 TOKEN=$(printf '%s' "$TEMPLATE" | sha256sum)
 TOKEN=${TOKEN%% *}
 
@@ -55,6 +69,7 @@ has_conflicting_dns_policy() {
 }
 
 [[ $ACTION == apply ]] || fail "Unsupported browser protection action"
+[[ -n $TEMPLATE ]] || fail "Unsupported browser protection provider"
 [[ $PROFILE_DIR == /* && $STATE_DIR == /* ]] \
   || fail "Browser protection paths must be absolute"
 [[ ! -L $PROFILE_DIR ]] || fail "Browser profile directory cannot be a symbolic link"
@@ -100,20 +115,21 @@ bwrap \
   --overlay-src "$POLICY_DIR" \
   --tmp-overlay "$POLICY_DIR" \
   --ro-bind "$POLICY_FILE" "$POLICY_DIR/omarchy-kids-web-protection.json" \
-  -- jq -e '
+  -- jq -e --arg template "$TEMPLATE" '
     .DnsOverHttpsMode == "secure"
-      and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
+      and .DnsOverHttpsTemplates == $template
   ' "$POLICY_DIR/omarchy-kids-web-protection.json" >/dev/null \
   || fail "Could not create the temporary Chromium policy overlay"
 
 jq -nc \
+  --arg provider "$PROVIDER" \
   --arg token "$TOKEN" \
   --arg policyPath "$POLICY_FILE" \
   --argjson running "$RUNNING" \
   --argjson pid "${pid:-null}" \
   '{
     configured: true,
-    provider: "cloudflare-family",
+    provider: $provider,
     token: $token,
     policyPath: $policyPath,
     running: $running,

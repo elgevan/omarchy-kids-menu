@@ -46,7 +46,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.17.0" and
+  .version == "0.18.0" and
   .author == "elgevan" and
   .description == "Temporarily switch your Omarchy desktop into a simpler space for a child, with chosen apps and automatic family web protection." and
   .kinds == ["menu", "bar-widget", "service"] and
@@ -65,7 +65,8 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
   && rg -Fq 'software running as the same Linux user' \
     "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'Cloudflare 1.1.1.1 for Families' "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'always enabled for the Kids browser' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'Open the gearbox in the Kids Menu panel' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'Family or AdGuard Family instead.' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'DNS filtering blocks domains' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
@@ -114,6 +115,36 @@ assert.deepEqual(
   ], allowlist.defaultIds()).map(row => row.entry.id),
   ["chromium", "omawrite.desktop"]
 )
+NODE
+
+node - "$PLUGIN_ROOT/Preferences.js" <<'NODE'
+const assert = require("node:assert/strict")
+const preferences = require(process.argv[2])
+
+assert.equal(preferences.DEFAULT_BROWSER_PROTECTION_PROVIDER, "cloudflare-family")
+assert.deepEqual(
+  preferences.browserProtectionProviders().map(provider => provider.id),
+  ["cloudflare-family", "cleanbrowsing-family", "adguard-family"]
+)
+assert.equal(preferences.parseSettings(""), null)
+assert.equal(preferences.parseSettings("not json"), null)
+assert.equal(preferences.parseSettings("x".repeat(65537)), null)
+assert.equal(preferences.parseSettings(JSON.stringify({version: 2,
+  browserProtectionProvider: "cloudflare-family"})), null)
+assert.equal(preferences.parseSettings(JSON.stringify({version: 1,
+  browserProtectionProvider: "unknown"})), null)
+assert.deepEqual(preferences.parseSettings(JSON.stringify({version: 1,
+  browserProtectionProvider: "cleanbrowsing-family"})), {
+  browserProtectionProvider: "cleanbrowsing-family"
+})
+assert.deepEqual(JSON.parse(preferences.settingsText("adguard-family")), {
+  version: 1,
+  browserProtectionProvider: "adguard-family"
+})
+assert.deepEqual(JSON.parse(preferences.settingsText("unknown")), {
+  version: 1,
+  browserProtectionProvider: "cloudflare-family"
+})
 NODE
 
 node - "$PLUGIN_ROOT/NotificationState.js" <<'NODE'
@@ -554,25 +585,48 @@ browser_proc=$browser_protection_dir/proc
 browser_policy_dir=$browser_protection_dir/system-policies
 mkdir -p "$browser_policy_dir"
 
+while IFS='|' read -r provider template; do
+  browser_result=$(
+    OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+      OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+      XDG_RUNTIME_DIR="$browser_runtime" \
+      "$BROWSER_PROTECTION" apply "$provider"
+  )
+  jq -e --arg provider "$provider" '
+    .configured == true
+      and .provider == $provider
+      and .running == false
+      and .pid == null
+      and (.token | test("^[0-9a-f]{64}$"))
+  ' <<<"$browser_result" >/dev/null \
+    && jq -e --arg template "$template" '
+      .DnsOverHttpsMode == "secure"
+        and .DnsOverHttpsTemplates == $template
+    ' "$browser_runtime/omarchy-kids/chromium-web-protection.json" >/dev/null \
+    || fail "browser protection does not prepare the $provider policy"
+done <<'EOF'
+cloudflare-family|https://family.cloudflare-dns.com/dns-query
+cleanbrowsing-family|https://doh.cleanbrowsing.org/doh/family-filter/
+adguard-family|https://family.adguard-dns.com/dns-query
+EOF
+
+if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply unknown \
+    >"$browser_protection_dir/unknown-provider.json"; then
+  fail "browser protection accepts an unknown provider"
+fi
+jq -e '.configured == false and (.error | contains("Unsupported browser protection provider"))' \
+    "$browser_protection_dir/unknown-provider.json" >/dev/null \
+  || fail "browser protection does not reject an unknown provider"
+
 browser_result=$(
   OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
     XDG_RUNTIME_DIR="$browser_runtime" \
-    "$BROWSER_PROTECTION" apply
+    "$BROWSER_PROTECTION" apply cloudflare-family
 )
-jq -e '
-  .configured == true
-    and .provider == "cloudflare-family"
-    and .running == false
-    and .pid == null
-    and (.token | test("^[0-9a-f]{64}$"))
-' \
-    <<<"$browser_result" >/dev/null \
-  && jq -e '
-    .DnsOverHttpsMode == "secure"
-      and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
-  ' "$browser_runtime/omarchy-kids/chromium-web-protection.json" >/dev/null \
-  || fail "browser protection does not prepare Cloudflare Families policy"
 
 mkdir -p "$browser_proc/4242"
 cloudflare_token=$(jq -r .token <<<"$browser_result")
@@ -586,7 +640,7 @@ browser_result=$(
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
     OMARCHY_KIDS_PROC_ROOT="$browser_proc" \
     XDG_RUNTIME_DIR="$browser_runtime" \
-    "$BROWSER_PROTECTION" apply
+    "$BROWSER_PROTECTION" apply cloudflare-family
 )
 jq -e '.configured == true and .running == true and .pid == 4242' \
     <<<"$browser_result" >/dev/null \
@@ -599,7 +653,7 @@ if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
     OMARCHY_KIDS_PROC_ROOT="$browser_proc" \
     XDG_RUNTIME_DIR="$browser_runtime" \
-    "$BROWSER_PROTECTION" apply \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
     >"$browser_protection_dir/running-mismatch.json"; then
   fail "browser protection accepts an unprotected running Chromium profile"
 fi
@@ -612,7 +666,7 @@ printf '%s\n' '{"DnsOverHttpsMode":"off"}' >"$browser_policy_dir/existing-dns.js
 if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
     XDG_RUNTIME_DIR="$browser_runtime" \
-    "$BROWSER_PROTECTION" apply \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
     >"$browser_protection_dir/conflicting-policy.json"; then
   fail "browser protection overrides an existing Chromium DNS policy"
 fi
@@ -633,6 +687,8 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'browserProtectionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'tooltipText: "Kids Menu settings"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \

@@ -6,6 +6,7 @@ import "Allowlist.js" as Allowlist
 import "KidsBrowser.js" as KidsBrowser
 import "ModeState.js" as ModeState
 import "NotificationState.js" as NotificationState
+import "Preferences.js" as Preferences
 import "ShellIntegration.js" as ShellIntegration
 import "WindowAdmission.js" as WindowAdmission
 
@@ -20,8 +21,11 @@ Item {
   property var pluginRegistry: null
   property string omarchyPath: ""
   property var allowedDesktopIds: Allowlist.defaultIds()
+  property string browserProtectionProvider: Preferences.DEFAULT_BROWSER_PROTECTION_PROVIDER
   property string browserProtectionError: ""
   property var pendingBrowserLaunch: null
+  property bool preferencesLoaded: false
+  property bool preferencesWritePending: false
   property bool directoryReady: false
   property bool runtimeToolsReady: false
   property bool runtimeToolsFailed: false
@@ -69,6 +73,7 @@ Item {
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string configDir: Quickshell.env("HOME") + "/.config/omarchy-kids"
   readonly property string configPath: configDir + "/allowed-apps.json"
+  readonly property string preferencesPath: configDir + "/settings.json"
   readonly property string modePath: configDir + "/mode.json"
   readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
   readonly property string stateDir: stateRoot + "/omarchy-kids"
@@ -86,6 +91,9 @@ Item {
     && root.notificationService
     && root.notificationService.doNotDisturb === true
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
+  readonly property bool settingsEditable: root.modeStateLoaded
+    && root.preferencesLoaded && !root.kidsModeEnabled
+  readonly property var browserProtectionOptions: Preferences.browserProtectionProviders()
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
     : "io.github.elgevan.kids-menu"
@@ -212,6 +220,38 @@ Item {
     if (!root.writePending) return
     root.writePending = false
     settingsFile.setText(Allowlist.settingsText(root.allowedDesktopIds))
+  }
+
+  function loadPreferences(rawText) {
+    var values = Preferences.parseSettings(rawText)
+    root.browserProtectionProvider = values
+      ? values.browserProtectionProvider
+      : Preferences.DEFAULT_BROWSER_PROTECTION_PROVIDER
+    root.preferencesLoaded = true
+  }
+
+  function persistPreferences() {
+    root.preferencesWritePending = true
+    if (root.directoryReady) {
+      root.flushPreferencesWrite()
+    } else if (!ensureDirectory.running) {
+      ensureDirectory.running = true
+    }
+  }
+
+  function flushPreferencesWrite() {
+    if (!root.preferencesWritePending) return
+    root.preferencesWritePending = false
+    preferencesFile.setText(Preferences.settingsText(root.browserProtectionProvider))
+  }
+
+  function setBrowserProtectionProvider(providerId) {
+    if (!root.settingsEditable) return false
+    var provider = Preferences.normalizeBrowserProtectionProvider(providerId)
+    if (provider === root.browserProtectionProvider) return false
+    root.browserProtectionProvider = provider
+    root.persistPreferences()
+    return true
   }
 
   function loadModeState(rawText) {
@@ -811,8 +851,12 @@ Item {
     if (!authorized) return false
 
     root.browserProtectionError = ""
-    root.pendingBrowserLaunch = {appUrl: String(appUrl || "")}
-    browserProtectionApply.command = [root.browserProtectionTool, "apply"]
+    var provider = root.browserProtectionProvider
+    root.pendingBrowserLaunch = {
+      appUrl: String(appUrl || ""),
+      provider: provider
+    }
+    browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]
     browserProtectionApply.running = true
     return true
   }
@@ -822,6 +866,7 @@ Item {
     root.pendingBrowserLaunch = null
     var result = root.parseWindowSessionOutput(output)
     if (exitCode !== 0 || !result || result.configured !== true
+        || (launch && String(result.provider || "") !== launch.provider)
         || !result.token || !result.policyPath) {
       root.browserProtectionError = result && result.error
         ? String(result.error)
@@ -1145,6 +1190,17 @@ Item {
   }
 
   FileView {
+    id: preferencesFile
+    path: root.preferencesPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadPreferences(text())
+    onLoadFailed: root.loadPreferences("")
+    onFileChanged: reload()
+  }
+
+  FileView {
     id: modeStateFile
     path: root.modePath
     watchChanges: true
@@ -1174,6 +1230,7 @@ Item {
       root.directoryReady = exitCode === 0
       if (root.directoryReady) {
         root.flushWrite()
+        root.flushPreferencesWrite()
         root.flushModeWrite()
         root.scheduleNotificationSetup()
         root.prepareRuntimeTools()

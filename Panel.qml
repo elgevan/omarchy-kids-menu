@@ -12,6 +12,7 @@ Panel {
   property var service: null
   property string filterText: ""
   property bool showSelectedOnly: false
+  property bool settingsOpen: false
   property int installedAllowedCount: 0
   property bool awaitingUnlock: false
   property string authError: ""
@@ -40,12 +41,23 @@ Panel {
   function open() {
     root.rebuildApps()
     root.controller.show()
-    Qt.callLater(function() { searchInput.forceActiveFocus() })
+    Qt.callLater(function() {
+      if (root.settingsOpen) settingsBackButton.forceActiveFocus()
+      else searchInput.forceActiveFocus()
+    })
   }
 
   function close() { root.controller.hide() }
   function toggle() { root.opened ? root.close() : root.open() }
   function closeForPopoutSwitch() { root.controller.hide() }
+
+  function showSettings(open) {
+    root.settingsOpen = open === true
+    Qt.callLater(function() {
+      if (root.settingsOpen) settingsBackButton.forceActiveFocus()
+      else searchInput.forceActiveFocus()
+    })
+  }
 
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function")
@@ -199,12 +211,14 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    focusTarget: searchInput
+    focusTarget: root.settingsOpen ? settingsBackButton : searchInput
     contentWidth: panel.fittedContentWidth(Style.space(440))
-    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(610))
+    contentHeight: panel.fittedContentHeight(root.settingsOpen
+      ? settingsPage.implicitHeight : contentColumn.implicitHeight, Style.space(610))
 
     Column {
       id: contentColumn
+      visible: !root.settingsOpen
       width: parent.width
       spacing: Style.space(8)
 
@@ -213,7 +227,7 @@ Panel {
         spacing: Style.space(8)
 
         Column {
-          width: parent.width - modeStatus.width - parent.spacing
+          width: parent.width - headerActions.width - parent.spacing
           spacing: Style.space(2)
 
           Text {
@@ -249,29 +263,45 @@ Panel {
           }
         }
 
-        BorderSurface {
-          id: modeStatus
+        Row {
+          id: headerActions
           anchors.verticalCenter: parent.verticalCenter
-          implicitWidth: modeStatusText.implicitWidth + Style.space(18)
-          implicitHeight: modeStatusText.implicitHeight + Style.space(9)
-          radius: height / 2
-          color: root.modePhase === "active"
-            ? Style.selectedFillFor(root.accent, root.accent)
-            : Style.normalFillFor(root.foreground, root.accent)
-          borderSpec: Border.controlSpec(
-            root.modePhase === "active" ? "selected" : "normal",
-            root.modePhase === "active" ? root.accent : root.foreground,
-            root.accent
-          )
+          spacing: Style.space(6)
 
-          Text {
-            id: modeStatusText
-            anchors.centerIn: parent
-            text: root.modeStatusLabel()
-            color: root.modePhase === "active" ? root.accent : root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
+          PanelActionButton {
+            id: settingsButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰒓"
+            tooltipText: "Kids Menu settings"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.showSettings(true)
+          }
+
+          BorderSurface {
+            id: modeStatus
+            anchors.verticalCenter: parent.verticalCenter
+            implicitWidth: modeStatusText.implicitWidth + Style.space(18)
+            implicitHeight: modeStatusText.implicitHeight + Style.space(9)
+            radius: height / 2
+            color: root.modePhase === "active"
+              ? Style.selectedFillFor(root.accent, root.accent)
+              : Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec(
+              root.modePhase === "active" ? "selected" : "normal",
+              root.modePhase === "active" ? root.accent : root.foreground,
+              root.accent
+            )
+
+            Text {
+              id: modeStatusText
+              anchors.centerIn: parent
+              text: root.modeStatusLabel()
+              color: root.modePhase === "active" ? root.accent : root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
           }
         }
       }
@@ -671,6 +701,175 @@ Panel {
             hoverEnabled: true
             cursorShape: root.allowlistEditable ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: if (root.service) root.service.resetDefaults()
+          }
+        }
+      }
+    }
+
+    Column {
+      id: settingsPage
+      visible: root.settingsOpen
+      width: parent.width
+      spacing: Style.space(14)
+
+      Item {
+        width: parent.width
+        implicitHeight: Math.max(settingsBackButton.implicitHeight,
+          settingsLabels.implicitHeight)
+
+        PanelActionButton {
+          id: settingsBackButton
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "󰁍"
+          tooltipText: "Back to apps"
+          foreground: root.foreground
+          focusable: true
+          fontFamily: root.fontFamily
+          onClicked: root.showSettings(false)
+          Keys.onEscapePressed: function(event) {
+            root.showSettings(false)
+            event.accepted = true
+          }
+        }
+
+        Column {
+          id: settingsLabels
+          anchors.left: settingsBackButton.right
+          anchors.leftMargin: Style.space(10)
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          Text {
+            width: parent.width
+            text: "SETTINGS"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            text: root.service && root.service.settingsEditable
+              ? "Changes apply to the next Kids browser launch"
+              : "Settings are locked while Kids Menu is active"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(7)
+
+        Text {
+          text: "WEB PROTECTION"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          text: "Choose one family-filtering DNS provider. No account is required."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
+
+        Repeater {
+          model: root.service ? root.service.browserProtectionOptions : []
+
+          delegate: BorderSurface {
+            id: providerOption
+            required property var modelData
+            readonly property bool selected: root.service
+              && root.service.browserProtectionProvider === modelData.id
+            width: settingsPage.width
+            height: Style.space(66)
+            radius: Style.cornerRadius
+            opacity: root.service && root.service.settingsEditable ? 1 : 0.55
+            color: selected
+              ? Style.selectedFillFor(root.accent, root.accent)
+              : providerMouse.containsMouse
+                ? Style.hoverFillFor(root.accent, root.accent)
+                : Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec(
+              selected ? "selected" : "normal",
+              selected ? root.accent : root.foreground,
+              root.accent
+            )
+
+            BorderSurface {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(20)
+              height: width
+              radius: height / 2
+              color: providerOption.selected ? root.accent : "transparent"
+              borderSpec: Border.controlSpec(
+                providerOption.selected ? "selected" : "normal",
+                providerOption.selected ? root.accent : root.foreground,
+                root.accent
+              )
+
+              Text {
+                visible: providerOption.selected
+                anchors.centerIn: parent
+                text: "✓"
+                color: Color.background
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+            }
+
+            Column {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(44)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                text: providerOption.modelData.label
+                color: providerOption.selected ? root.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+
+              Text {
+                width: parent.width
+                text: providerOption.modelData.description
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+
+            MouseArea {
+              id: providerMouse
+              anchors.fill: parent
+              enabled: root.service && root.service.settingsEditable
+              hoverEnabled: true
+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: root.service.setBrowserProtectionProvider(
+                providerOption.modelData.id)
+            }
           }
         }
       }
