@@ -1966,6 +1966,12 @@ rg -Fq 'id: appGrid' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'return "START WITH " + root.selectedAppsLabel()' "$PLUGIN_ROOT/Panel.qml" \
   || fail "the app picker is not the searchable tile-first flow with selected-app review"
 
+rg -Fq 'id: settingsScroll' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'contentHeight: settingsPage.implicitHeight' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'id: settingsScrollThumb' "$PLUGIN_ROOT/Panel.qml" \
+  && ! rg -Fq 'height: Style.space(170)' "$PLUGIN_ROOT/Panel.qml" \
+  || fail "the settings page can clip or create a nested fixed-height scroll area"
+
 rg -Fq 'import "BarActions.js" as BarActions' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -Fq 'root.kidsModeEnabled,' "$PLUGIN_ROOT/BarWidget.qml" \
   && rg -Fq 'buttonCode === Qt.RightButton' "$PLUGIN_ROOT/BarWidget.qml" \

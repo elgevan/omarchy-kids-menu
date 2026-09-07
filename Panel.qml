@@ -706,11 +706,25 @@ Panel {
       }
     }
 
-    Column {
-      id: settingsPage
+    Item {
+      id: settingsViewport
       visible: root.settingsOpen
-      width: parent.width
-      spacing: Style.space(14)
+      anchors.fill: parent
+
+      Flickable {
+        id: settingsScroll
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: settingsPage.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
+        clip: true
+        onVisibleChanged: if (visible) contentY = 0
+
+        Column {
+          id: settingsPage
+          width: settingsScroll.width
+          spacing: Style.space(14)
 
       Item {
         width: parent.width
@@ -909,35 +923,34 @@ Panel {
           wrapMode: Text.WordWrap
         }
 
-        ListView {
+        Column {
           id: pluginOptions
           visible: root.service && root.service.exemptPluginOptions.length > 0
           width: parent.width
-          height: Style.space(170)
-          model: root.service ? root.service.exemptPluginOptions : []
           spacing: Style.space(6)
-          clip: true
-          boundsBehavior: Flickable.StopAtBounds
 
-          delegate: BorderSurface {
-            id: pluginOption
-            required property var modelData
-            readonly property bool selected: root.service
-              && root.service.isPluginExempt(modelData.id)
-            width: pluginOptions.width
-            height: Style.space(54)
-            radius: Style.cornerRadius
-            opacity: root.service && root.service.settingsEditable ? 1 : 0.55
-            color: selected
-              ? Style.selectedFillFor(root.accent, root.accent)
-              : pluginMouse.containsMouse
-                ? Style.hoverFillFor(root.accent, root.accent)
-                : Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec(
-              selected ? "selected" : "normal",
-              selected ? root.accent : root.foreground,
-              root.accent
-            )
+          Repeater {
+            model: root.service ? root.service.exemptPluginOptions : []
+
+            delegate: BorderSurface {
+              id: pluginOption
+              required property var modelData
+              readonly property bool selected: root.service
+                && root.service.isPluginExempt(modelData.id)
+              width: pluginOptions.width
+              height: Style.space(54)
+              radius: Style.cornerRadius
+              opacity: root.service && root.service.settingsEditable ? 1 : 0.55
+              color: selected
+                ? Style.selectedFillFor(root.accent, root.accent)
+                : pluginMouse.containsMouse
+                  ? Style.hoverFillFor(root.accent, root.accent)
+                  : Style.normalFillFor(root.foreground, root.accent)
+              borderSpec: Border.controlSpec(
+                selected ? "selected" : "normal",
+                selected ? root.accent : root.foreground,
+                root.accent
+              )
 
             BorderSurface {
               anchors.left: parent.left
@@ -994,16 +1007,39 @@ Panel {
               }
             }
 
-            MouseArea {
-              id: pluginMouse
-              anchors.fill: parent
-              enabled: root.service && root.service.settingsEditable
-              hoverEnabled: true
-              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: root.service.togglePluginExempt(pluginOption.modelData.id)
+              MouseArea {
+                id: pluginMouse
+                anchors.fill: parent
+                enabled: root.service && root.service.settingsEditable
+                hoverEnabled: true
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: root.service.togglePluginExempt(pluginOption.modelData.id)
+              }
             }
           }
         }
+        }
+      }
+        }
+
+      Rectangle {
+        id: settingsScrollThumb
+        visible: settingsScroll.contentHeight > settingsScroll.height
+        x: parent.width - width
+        y: {
+          var scrollRange = settingsScroll.contentHeight - settingsScroll.height
+          if (scrollRange <= 0) return 0
+          var travel = settingsScroll.height - height
+          return Math.max(0, Math.min(travel,
+            settingsScroll.contentY / scrollRange * travel))
+        }
+        width: Math.max(2, Style.space(3))
+        height: Math.max(Style.space(24),
+          settingsScroll.height * settingsScroll.height
+            / settingsScroll.contentHeight)
+        radius: width / 2
+        color: root.foreground
+        opacity: 0.32
       }
     }
   }
