@@ -71,7 +71,8 @@ rg -Fq 'your password or fingerprint and restores your desktop as it was.' \
   && rg -Fq 'The gearbox also lists user-installed plugin widgets' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'only exempt plugins you trust a child to use' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'DNS filtering blocks domains' "$PLUGIN_ROOT/README.md" \
-  && rg -Fq 'requires no elevated privileges' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'fetch additional code at runtime' "$PLUGIN_ROOT/README.md" \
+  && rg -Fq 'privileges.' "$PLUGIN_ROOT/README.md" \
   && rg -Fq 'hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app' \
     "$PLUGIN_ROOT/README.md" \
   || fail "README does not document the authentication boundary and runtime integrations"
@@ -678,6 +679,7 @@ assert.equal(
 )
 assert.equal(browser.webAppUrl([], "chromium https://youtube.com/"), "")
 assert.equal(browser.profileDir("/home/kid/"), "/home/kid/.local/share/omarchy-kids/chromium")
+assert.equal(browser.policyDir(), "/etc/chromium/policies/managed")
 assert.deepEqual(browser.windowClasses(""), ["chromium"])
 assert.deepEqual(browser.windowClasses("https://youtube.com/"), ["chromium", "chrome-youtube.com__-default"])
 assert.deepEqual(browser.windowClasses("https://EXAMPLE.com:8443/watch?v=1#x"), ["chromium", "chrome-example.com__watch-default"])
@@ -726,10 +728,13 @@ while IFS='|' read -r provider template; do
   jq -e --arg provider "$provider" '
     .configured == true
       and .provider == $provider
+      and .profileDir == $profileDir
+      and .policyDir == $policyDir
       and .running == false
       and .pid == null
       and (.token | test("^[0-9a-f]{64}$"))
-  ' <<<"$browser_result" >/dev/null \
+  ' --arg profileDir "$browser_profile" --arg policyDir "$browser_policy_dir" \
+    <<<"$browser_result" >/dev/null \
     && jq -e --arg template "$template" '
       .DnsOverHttpsMode == "secure"
         and .DnsOverHttpsTemplates == $template
@@ -740,6 +745,20 @@ cloudflare-family|https://family.cloudflare-dns.com/dns-query
 cleanbrowsing-family|https://doh.cleanbrowsing.org/doh/family-filter/
 adguard-family|https://family.adguard-dns.com/dns-query
 EOF
+
+browser_result=$(
+  OMARCHY_KIDS_BROWSER_PROFILE="$browser_protection_dir/wrong-profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_protection_dir/wrong-policies" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
+    "$browser_profile" "$browser_policy_dir"
+)
+jq -e --arg profileDir "$browser_profile" --arg policyDir "$browser_policy_dir" '
+  .configured == true
+    and .profileDir == $profileDir
+    and .policyDir == $policyDir
+' <<<"$browser_result" >/dev/null \
+  || fail "explicit browser launch paths do not override test-only environment paths"
 
 if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
@@ -805,6 +824,70 @@ jq -e '.configured == false and (.error | contains("existing Chromium DNS policy
     "$browser_protection_dir/conflicting-policy.json" >/dev/null \
   || fail "browser protection does not report an existing DNS policy"
 
+rm -f "$browser_policy_dir/existing-dns.json"
+mkdir -p "$browser_runtime/omarchy-kids"
+(
+  exec 8>"$browser_runtime/omarchy-kids/browser-protection.lock"
+  flock -x 8
+  printf ready >"$browser_protection_dir/lock-ready"
+  sleep 30
+) &
+browser_lock_pid=$!
+for _ in $(seq 1 30); do
+  [[ -f $browser_protection_dir/lock-ready ]] && break
+  sleep 0.1
+done
+if timeout 6 env \
+    OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
+    >"$browser_protection_dir/lock-busy.json"; then
+  kill "$browser_lock_pid" 2>/dev/null || true
+  wait "$browser_lock_pid" 2>/dev/null || true
+  fail "browser protection waits indefinitely for its lock"
+fi
+kill "$browser_lock_pid" 2>/dev/null || true
+wait "$browser_lock_pid" 2>/dev/null || true
+jq -e '.configured == false and (.error | contains("busy"))' \
+    "$browser_protection_dir/lock-busy.json" >/dev/null \
+  || fail "browser protection does not report lock contention"
+
+browser_mock_bin=$browser_protection_dir/mock-bin
+mkdir -p "$browser_mock_bin"
+printf '%s\n' '#!/bin/bash' \
+  'if [[ ${1:-} == --help ]]; then' \
+  '  [[ ${OMARCHY_KIDS_TEST_BWRAP_MODE:-} == help-hang ]] && sleep 30' \
+  "  printf '%s\\n' --tmp-overlay" \
+  '  exit 0' \
+  'fi' \
+  'sleep 30' >"$browser_mock_bin/bwrap"
+chmod 0700 "$browser_mock_bin/bwrap"
+if PATH="$browser_mock_bin:$PATH" \
+    OMARCHY_KIDS_TEST_BWRAP_MODE=help-hang \
+    OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
+    >"$browser_protection_dir/help-timeout.json"; then
+  fail "browser protection accepts a hung Bubblewrap capability probe"
+fi
+jq -e '.configured == false and (.error | contains("inspect Bubblewrap"))' \
+    "$browser_protection_dir/help-timeout.json" >/dev/null \
+  || fail "browser protection does not report a timed-out capability probe"
+if PATH="$browser_mock_bin:$PATH" \
+    OMARCHY_KIDS_TEST_BWRAP_MODE=overlay-hang \
+    OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply cloudflare-family \
+    >"$browser_protection_dir/overlay-timeout.json"; then
+  fail "browser protection accepts a hung Bubblewrap overlay probe"
+fi
+jq -e '.configured == false and (.error | contains("temporary Chromium policy overlay"))' \
+    "$browser_protection_dir/overlay-timeout.json" >/dev/null \
+  || fail "browser protection does not report a timed-out overlay probe"
+
 rm -rf -- "$browser_protection_dir"
 
 [[ -x $WINDOW_SESSION ]] || fail "window-session helper is not executable"
@@ -818,13 +901,54 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'browserProtectionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
-  && rg -Fq 'browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.browserProfileDir,' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'root.browserPolicyDir' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'tooltipText: "Kids Menu settings"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'text: "KEEP PLUGINS AVAILABLE"' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'root.effectiveExemptPluginIds()' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'wrapMode: Text.WordWrap' "$PLUGIN_ROOT/Panel.qml" \
   && rg -q 'root\.lifecycleCleanupTool,' "$PLUGIN_ROOT/Service.qml" \
   || fail "cleanup helpers are not staged outside the removable plugin checkout"
+node - "$PLUGIN_ROOT/Service.qml" "$PLUGIN_ROOT/Panel.qml" <<'NODE'
+const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const service = fs.readFileSync(process.argv[2], "utf8")
+const panel = fs.readFileSync(process.argv[3], "utf8")
+
+const requestStart = service.indexOf("function requestBrowserLaunch(")
+const finishStart = service.indexOf("function finishBrowserProtection(")
+const finishEnd = service.indexOf("function pendingExpectedWindows(")
+assert.ok(requestStart >= 0 && finishStart > requestStart && finishEnd > finishStart)
+const request = service.slice(requestStart, finishStart)
+const finish = service.slice(finishStart, finishEnd)
+assert.doesNotMatch(request, /authorize(?:App|Browser)Launch\s*\(/)
+assert.match(request, /desktopId:\s*id/)
+assert.match(request, /browserProtectionTimeout\.restart\(\)/)
+assert.match(request, /browserProtectionApply\.command\s*=\s*\[\s*root\.browserProtectionTool,\s*"apply",\s*provider,\s*root\.browserProfileDir,\s*root\.browserPolicyDir\s*\]/)
+assert.match(finish, /result\.profileDir/)
+assert.match(finish, /result\.policyDir/)
+const validation = finish.indexOf("result.configured !== true")
+const authorization = finish.search(/authorize(?:App|Browser)Launch\s*\(/)
+const dispatch = finish.indexOf("Quickshell.execDetached(command)")
+assert.ok(validation >= 0 && authorization > validation && dispatch > authorization)
+assert.match(service, /function cancelBrowserProtection\(\)[\s\S]*browserProtectionApply\.running = false/)
+assert.match(service, /function beginDeactivation\(\)[\s\S]*root\.cancelBrowserProtection\(\)/)
+assert.match(service, /function rollbackActivation\(message\)[\s\S]*root\.cancelBrowserProtection\(\)/)
+const timeoutStart = service.indexOf("id: browserProtectionTimeout")
+const timeoutEnd = service.indexOf("id: notificationSetup", timeoutStart)
+assert.ok(timeoutStart >= 0 && timeoutEnd > timeoutStart)
+const timeout = service.slice(timeoutStart, timeoutEnd)
+assert.match(timeout, /if \(!browserProtectionApply\.running\) return/)
+assert.doesNotMatch(timeout, /if \([^\n]*pendingBrowserLaunch[^\n]*\) return/)
+assert.match(timeout, /browserProtectionApply\.running = false/)
+
+for (const field of ["label", "id"]) {
+  const pattern = new RegExp(
+    String.raw`Text\s*\{[^{}]*text:\s*pluginOption\.modelData\.` + field
+      + String.raw`[^{}]*textFormat:\s*Text\.PlainText[^{}]*\}`, "s")
+  assert.match(panel, pattern)
+}
+NODE
 rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'function onRawEvent(event) { root.handleHyprlandEvent(event) }' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.failActiveMode("Could not maintain muted notifications")' "$PLUGIN_ROOT/Service.qml" \

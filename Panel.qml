@@ -975,6 +975,7 @@ Panel {
               Text {
                 width: parent.width
                 text: pluginOption.modelData.label
+                textFormat: Text.PlainText
                 color: pluginOption.selected ? root.accent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -985,6 +986,7 @@ Panel {
               Text {
                 width: parent.width
                 text: pluginOption.modelData.id
+                textFormat: Text.PlainText
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption

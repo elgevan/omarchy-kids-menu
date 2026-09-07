@@ -11,6 +11,11 @@ LOCK_FILE=$STATE_DIR/browser-protection.lock
 POLICY_FILE=$STATE_DIR/chromium-web-protection.json
 POLICY_DIR=${OMARCHY_KIDS_CHROMIUM_POLICY_DIR:-/etc/chromium/policies/managed}
 PROC_ROOT=${OMARCHY_KIDS_PROC_ROOT:-/proc}
+LOCK_WAIT_SECONDS=2
+COMMAND_TIMEOUT_SECONDS=3
+
+[[ -z ${3:-} ]] || PROFILE_DIR=$3
+[[ -z ${4:-} ]] || POLICY_DIR=$4
 case $PROVIDER in
   cloudflare-family)
     TEMPLATE=https://family.cloudflare-dns.com/dns-query
@@ -76,7 +81,8 @@ has_conflicting_dns_policy() {
 [[ ! -L $STATE_DIR ]] || fail "Browser protection state cannot be a symbolic link"
 install -d -m 0700 -- "$PROFILE_DIR" "$STATE_DIR"
 exec 9>"$LOCK_FILE"
-flock 9
+flock -w "$LOCK_WAIT_SECONDS" -x 9 \
+  || fail "Browser protection is busy; try again"
 
 if pid=$(profile_pid); then
   running_mode_matches "$pid" \
@@ -89,7 +95,13 @@ fi
 
 command -v bwrap >/dev/null 2>&1 \
   || fail "Bubblewrap is required for protected browsing"
-bwrap --help 2>&1 | grep -Fq -- '--tmp-overlay' \
+command -v timeout >/dev/null 2>&1 \
+  || fail "Coreutils timeout is required for protected browsing"
+if ! bwrap_help=$(timeout --kill-after=1s "${COMMAND_TIMEOUT_SECONDS}s" \
+    bwrap --help 2>&1); then
+  fail "Could not inspect Bubblewrap capabilities"
+fi
+grep -Fq -- '--tmp-overlay' <<<"$bwrap_help" \
   || fail "Bubblewrap does not support temporary policy overlays"
 [[ -d $POLICY_DIR ]] \
   || fail "Chromium's managed policy directory is unavailable"
@@ -108,7 +120,7 @@ jq -nc --arg template "$TEMPLATE" '{
 mv -- "$policy_tmp" "$POLICY_FILE"
 trap - EXIT
 
-bwrap \
+timeout --kill-after=1s "${COMMAND_TIMEOUT_SECONDS}s" bwrap \
   --bind / / \
   --dev-bind /dev /dev \
   --proc /proc \
@@ -125,6 +137,8 @@ jq -nc \
   --arg provider "$PROVIDER" \
   --arg token "$TOKEN" \
   --arg policyPath "$POLICY_FILE" \
+  --arg profileDir "$PROFILE_DIR" \
+  --arg policyDir "$POLICY_DIR" \
   --argjson running "$RUNNING" \
   --argjson pid "${pid:-null}" \
   '{
@@ -132,6 +146,8 @@ jq -nc \
     provider: $provider,
     token: $token,
     policyPath: $policyPath,
+    profileDir: $profileDir,
+    policyDir: $policyDir,
     running: $running,
     pid: $pid
   }'

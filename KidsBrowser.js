@@ -41,6 +41,10 @@ function profileDir(homeDir) {
   return home + "/.local/share/omarchy-kids/chromium"
 }
 
+function policyDir() {
+  return "/etc/chromium/policies/managed"
+}
+
 function windowClasses(appUrl) {
   var classes = ["chromium"]
   // Chromium's Wayland app id is its shortcut filename: chrome-host_path-Default.
@@ -74,16 +78,17 @@ function launchCommand(homeDir, appUrl, protection) {
   var url = String(appUrl || "")
   chromiumCommand.push(url ? "--app=" + url : "--new-window")
 
+  var managedPolicyDir = policyDir()
   var command = [
     "uwsm-app", "--",
     "/usr/bin/bwrap",
     "--bind", "/", "/",
     "--dev-bind", "/dev", "/dev",
     "--proc", "/proc",
-    "--overlay-src", "/etc/chromium/policies/managed",
-    "--tmp-overlay", "/etc/chromium/policies/managed",
+    "--overlay-src", managedPolicyDir,
+    "--tmp-overlay", managedPolicyDir,
     "--ro-bind", policyPath,
-    "/etc/chromium/policies/managed/omarchy-kids-web-protection.json",
+    managedPolicyDir + "/omarchy-kids-web-protection.json",
     "--"
   ]
 
@@ -98,6 +103,7 @@ if (typeof module !== "undefined") {
     urlFromExecString: urlFromExecString,
     webAppUrl: webAppUrl,
     profileDir: profileDir,
+    policyDir: policyDir,
     windowClasses: windowClasses,
     launchCommand: launchCommand
   }

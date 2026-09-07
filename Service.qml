@@ -26,6 +26,7 @@ Item {
   property var exemptPluginOptions: []
   property string browserProtectionError: ""
   property var pendingBrowserLaunch: null
+  property bool browserProtectionTimedOut: false
   property bool preferencesLoaded: false
   property bool preferencesWritePending: false
   property bool directoryReady: false
@@ -130,6 +131,9 @@ Item {
   readonly property string browserProtectionTool: runtimeToolsReady
     ? runtimeToolDir + "/browser-protection"
     : ""
+  readonly property string browserProfileDir: KidsBrowser.profileDir(homeDir)
+  readonly property string browserPolicyDir: KidsBrowser.policyDir()
+  readonly property int browserProtectionTimeoutMs: 12000
 
   signal allowlistChanged()
   signal kidsModeChanged()
@@ -523,7 +527,7 @@ Item {
     root.shortcutPolicyError = ""
     root.modePhase = "exiting"
     root.controlReleaseStarted = false
-    root.pendingBrowserLaunch = null
+    root.cancelBrowserProtection()
     root.windowSessionDesired = false
     root.windowSessionSynced = false
     // Restore windows before relaxing the menu, shortcut, and DND controls.
@@ -539,7 +543,7 @@ Item {
     root.activationWaitingForTools = false
     root.modePhase = "rollback"
     root.controlReleaseStarted = false
-    root.pendingBrowserLaunch = null
+    root.cancelBrowserProtection()
     root.windowSessionDesired = false
     root.windowSessionSynced = false
     if (!root.windowSessionTool) {
@@ -614,6 +618,7 @@ Item {
 
   function failActiveMode(message) {
     if (root.modePhase !== "active" && root.modePhase !== "error") return
+    root.cancelBrowserProtection()
     root.modeTransitionError = message || "Kids Menu protection needs attention"
     root.errorRecoveryKind = "protection-failure"
     root.modePhase = "error"
@@ -930,50 +935,88 @@ Item {
   function requestBrowserLaunch(desktopId, appUrl) {
     if (!root.kidsModeEnabled || root.modePhase !== "active"
         || !root.browserProtectionTool || browserProtectionApply.running
-        || root.pendingBrowserLaunch)
+        || root.browserProtectionTimedOut || root.pendingBrowserLaunch)
       return false
 
     var id = KidsBrowser.normalizeDesktopId(desktopId)
-    var authorized = id
-      ? root.authorizeAppLaunch(id, true)
-      : root.authorizeBrowserLaunch()
-    if (!authorized) return false
+    if ((id && !root.isAllowed(id))
+        || (!id && !root.shortcutAllowed([
+          "chromium", "google-chrome", "google-chrome-stable"
+        ])))
+      return false
 
     root.browserProtectionError = ""
     var provider = root.browserProtectionProvider
     root.pendingBrowserLaunch = {
+      desktopId: id,
       appUrl: String(appUrl || ""),
-      provider: provider
+      provider: provider,
+      profileDir: root.browserProfileDir,
+      policyDir: root.browserPolicyDir
     }
-    browserProtectionApply.command = [root.browserProtectionTool, "apply", provider]
+    browserProtectionApply.command = [
+      root.browserProtectionTool,
+      "apply",
+      provider,
+      root.browserProfileDir,
+      root.browserPolicyDir
+    ]
     browserProtectionApply.running = true
+    browserProtectionTimeout.restart()
     return true
+  }
+
+  function failBrowserProtection(message) {
+    root.pendingBrowserLaunch = null
+    root.browserProtectionError = String(message || "Could not prepare protected browsing")
+    console.warn("omarchy-kids: browser protection failed: "
+      + root.browserProtectionError)
+    Quickshell.execDetached([
+      "omarchy-notification-send",
+      "Kids browser did not open: " + root.browserProtectionError
+    ])
+  }
+
+  function cancelBrowserProtection() {
+    root.pendingBrowserLaunch = null
+    browserProtectionTimeout.stop()
+    if (!browserProtectionApply.running) return
+    root.browserProtectionTimedOut = true
+    browserProtectionApply.running = false
   }
 
   function finishBrowserProtection(exitCode, output) {
     var launch = root.pendingBrowserLaunch
     root.pendingBrowserLaunch = null
+    if (!launch) return
+
     var result = root.parseWindowSessionOutput(output)
     if (exitCode !== 0 || !result || result.configured !== true
-        || (launch && String(result.provider || "") !== launch.provider)
+        || String(result.provider || "") !== launch.provider
+        || String(result.profileDir || "") !== launch.profileDir
+        || String(result.policyDir || "") !== launch.policyDir
         || !result.token || !result.policyPath) {
-      root.browserProtectionError = result && result.error
+      root.failBrowserProtection(result && result.error
         ? String(result.error)
-        : "Could not prepare protected browsing"
-      console.warn("omarchy-kids: browser protection failed with exit code "
-        + exitCode + ": " + root.browserProtectionError)
-      Quickshell.execDetached([
-        "omarchy-notification-send",
-        "Kids browser did not open: " + root.browserProtectionError
-      ])
+        : "Could not prepare protected browsing")
       return
     }
 
-    if (!launch || !root.kidsModeEnabled || root.modePhase !== "active") return
-    Quickshell.execDetached(KidsBrowser.launchCommand(root.homeDir, launch.appUrl, {
+    if (!root.kidsModeEnabled || root.modePhase !== "active") return
+    var command = KidsBrowser.launchCommand(root.homeDir, launch.appUrl, {
       token: String(result.token || ""),
       policyPath: String(result.policyPath || "")
-    }))
+    })
+    if (command.length === 0) {
+      root.failBrowserProtection("Could not build the protected browser command")
+      return
+    }
+
+    var authorized = launch.desktopId
+      ? root.authorizeAppLaunch(launch.desktopId, true)
+      : root.authorizeBrowserLaunch()
+    if (!authorized) return
+    Quickshell.execDetached(command)
   }
 
   function pendingExpectedWindows() {
@@ -1462,7 +1505,26 @@ Item {
     command: []
     stdout: StdioCollector { id: browserProtectionOutput; waitForEnd: true }
     onExited: function(exitCode) {
+      browserProtectionTimeout.stop()
+      if (root.browserProtectionTimedOut) {
+        root.browserProtectionTimedOut = false
+        return
+      }
       root.finishBrowserProtection(exitCode, browserProtectionOutput.text)
+    }
+  }
+
+  Timer {
+    id: browserProtectionTimeout
+    interval: root.browserProtectionTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!browserProtectionApply.running) return
+      var notifyFailure = root.pendingBrowserLaunch !== null
+      root.browserProtectionTimedOut = true
+      browserProtectionApply.running = false
+      if (notifyFailure)
+        root.failBrowserProtection("Browser protection timed out")
     }
   }
 
