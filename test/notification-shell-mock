@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+STATE=${OMARCHY_KIDS_TEST_DND_STATE:?DND state path is required}
+if [[ -n ${OMARCHY_KIDS_TEST_EXPECT_OMARCHY_PATH:-} ]]; then
+  [[ ${OMARCHY_PATH:-} == "$OMARCHY_KIDS_TEST_EXPECT_OMARCHY_PATH" ]]
+fi
+
+case "${1:-} ${2:-}" in
+  "notifications setDnd")
+    [[ ${3:-} == on || ${3:-} == off ]]
+    printf '%s\n' "$3" >"$STATE"
+    printf '%s\n' "$3"
+    ;;
+  "notifications isDnd")
+    cat "$STATE"
+    ;;
+  *)
+    printf 'unexpected omarchy-shell mock call: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac

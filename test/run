@@ -14,6 +14,7 @@ BROWSER_PROTECTION="$PLUGIN_ROOT/browser-protection"
 bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
   "$PLUGIN_ROOT/test/hyprctl-mock" "$PLUGIN_ROOT/test/keybindings-mock" \
   "$PLUGIN_ROOT/test/window-hyprctl-mock" \
+  "$PLUGIN_ROOT/test/notification-shell-mock" \
   "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP" \
   "$BROWSER_PROTECTION"
 
@@ -795,9 +796,21 @@ browser_result=$(
 jq -e '.configured == true and .running == true and .pid == 4242' \
     <<<"$browser_result" >/dev/null \
   || fail "browser protection rejects a matching Cloudflare-protected browser"
-printf '%s\0%s\0' /usr/lib/chromium/chromium \
-  "--user-data-dir=$browser_profile" \
-  "--omarchy-kids-web-protection=wrong-token" \
+
+# Chromium rewrites its own proc cmdline into one space-joined string.
+printf '%s' "/usr/lib/chromium/chromium --user-data-dir=$browser_profile --omarchy-kids-web-protection=$cloudflare_token" \
+  >"$browser_proc/4242/cmdline"
+browser_result=$(
+  OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
+    OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
+    OMARCHY_KIDS_PROC_ROOT="$browser_proc" \
+    XDG_RUNTIME_DIR="$browser_runtime" \
+    "$BROWSER_PROTECTION" apply cloudflare-family
+)
+jq -e '.configured == true and .running == true and .pid == 4242' \
+    <<<"$browser_result" >/dev/null \
+  || fail "browser protection misses Chromium's rewritten proc cmdline"
+printf '%s' "/usr/lib/chromium/chromium --user-data-dir=$browser_profile --omarchy-kids-web-protection=wrong-token" \
   >"$browser_proc/4242/cmdline"
 if OMARCHY_KIDS_BROWSER_PROFILE="$browser_profile" \
     OMARCHY_KIDS_CHROMIUM_POLICY_DIR="$browser_policy_dir" \
@@ -1566,6 +1579,11 @@ jq -e '.status == "stale-session" and .workspaceRemoved == true
 window_cleanup_dir=$(mktemp -d)
 cleanup_log=$window_cleanup_dir/hyprctl.log
 cleanup_marker=$window_cleanup_dir/client-query.marker
+cleanup_notification_state=$window_cleanup_dir/notifications.json
+cleanup_dnd_state=$window_cleanup_dir/dnd
+printf '%s\n' '{"version":1,"managed":true,"restoreDnd":false}' \
+  >"$cleanup_notification_state"
+printf '%s\n' on >"$cleanup_dnd_state"
 HYPRLAND_INSTANCE_SIGNATURE=test-instance \
   XDG_STATE_HOME="$window_cleanup_dir" \
   OMARCHY_KIDS_HYPRCTL="$window_mock" \
@@ -1575,7 +1593,8 @@ HYPRLAND_INSTANCE_SIGNATURE=test-instance \
   OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_log" \
   "$WINDOW_SESSION" enter >/dev/null
 window_result=$(
-  HYPRLAND_INSTANCE_SIGNATURE=test-instance \
+  env -u OMARCHY_PATH \
+    HYPRLAND_INSTANCE_SIGNATURE=test-instance \
     XDG_STATE_HOME="$window_cleanup_dir" \
     XDG_RUNTIME_DIR="$window_cleanup_dir/runtime" \
     OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS=0 \
@@ -1587,12 +1606,19 @@ window_result=$(
     OMARCHY_KIDS_TEST_ACTIVE_WINDOW="$window_active" \
     OMARCHY_KIDS_TEST_ACTIVE_WORKSPACE="$window_workspace" \
     OMARCHY_KIDS_TEST_WINDOW_LOG="$cleanup_log" \
-    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY"
+    OMARCHY_KIDS_OMARCHY_SHELL="$PLUGIN_ROOT/test/notification-shell-mock" \
+    OMARCHY_KIDS_TEST_DND_STATE="$cleanup_dnd_state" \
+    OMARCHY_KIDS_TEST_EXPECT_OMARCHY_PATH="$PLUGIN_ROOT/test-omarchy" \
+    "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY" \
+      "$cleanup_notification_state" "$PLUGIN_ROOT/test-omarchy"
 )
 jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null \
   && jq -e '.active == false and .status == "restored"
     and .evacuated == 3 and .workspaceRemoved == true' \
     "$window_cleanup_dir/omarchy-kids/windows.json" >/dev/null \
+  && [[ $(<"$cleanup_dnd_state") == off ]] \
+  && jq -e '.managed == false and .restoreDnd == false' \
+    "$cleanup_notification_state" >/dev/null \
   || fail "detached lifecycle cleanup does not order verified exit before shortcut release"
 
 window_cleanup_refusal_dir=$(mktemp -d)

@@ -18,10 +18,13 @@ RUNTIME_TOOL_DIR="$RUNTIME_ROOT/omarchy-kids/tools"
 SHORTCUT_MARKER="$RUNTIME_ROOT/omarchy-kids/shortcut-policy.active"
 kids_launched_address=""
 removal_kids_address=""
+adult_address=""
+adult_second_address=""
 original_workspace=""
 original_monitor=""
 original_bar_layout=""
 inactive_bar_layout=""
+plugin_source=""
 
 mkdir -p "$ARTIFACTS"
 packages_before=$(pacman -Qq | sort)
@@ -66,7 +69,10 @@ layer_absent() {
 screen_contains() {
   local text=$1 snapshot=/tmp/omarchy-kids-menu-ocr.png
   timeout 10 grim -s 2 "$snapshot" 2>/dev/null || return 1
-  tesseract "$snapshot" stdout --psm 11 2>/dev/null | grep -Fi -- "$text" >/dev/null
+  tesseract "$snapshot" stdout --psm 11 2>/dev/null \
+    | tr '\n' ' ' \
+    | sed 's/[[:space:]][[:space:]]*/ /g' \
+    | grep -Fi -- "$text" >/dev/null
 }
 
 screen_lacks() {
@@ -313,7 +319,7 @@ kids_chromium_visible() {
     command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
     [[ $command == *"--user-data-dir=$KIDS_BROWSER_PROFILE"* ]] && return 0
   done < <(hyprctl -j clients | jq -r '
-    .[] | select(.workspace.name == "1" and (.class | ascii_downcase) == "chromium") | .pid')
+    .[] | select(.workspace.name == "1") | .pid')
   return 1
 }
 
@@ -330,7 +336,7 @@ kids_chromium_protected() {
         and .DnsOverHttpsTemplates == "https://family.cloudflare-dns.com/dns-query"
     ' "/proc/$pid/root$policy" >/dev/null 2>&1 && return 0
   done < <(hyprctl -j clients | jq -r '
-    .[] | select(.workspace.name == "1" and (.class | ascii_downcase) == "chromium") | .pid')
+    .[] | select(.workspace.name == "1") | .pid')
   return 1
 }
 
@@ -372,7 +378,19 @@ cleanup() {
     wtype "$OMARCHY_KIDS_TEST_PASSWORD" -s 750 -k Return >/dev/null 2>&1 || true
     sleep 2
   fi
+  if [[ -n $adult_address ]]; then
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_address\" })" \
+      >/dev/null 2>&1 || true
+  fi
+  if [[ -n $adult_second_address ]]; then
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_second_address\" })" \
+      >/dev/null 2>&1 || true
+  fi
   rm -f -- "$ALLOWLIST" "$MODE_STATE" "$NOTIFICATION_STATE"
+  if [[ -n $plugin_source ]]; then
+    rm -rf -- "$plugin_source"
+    plugin_source=""
+  fi
 }
 trap cleanup EXIT
 
@@ -387,8 +405,19 @@ original_plugin_state=$(jq -c \
   '{plugins: (.plugins // []), disabledPlugins: (.disabledPlugins // null)}' \
   "$HOME/.config/omarchy/shell.json")
 
-omarchy plugin add "file://$PLUGIN_ROOT" --enable --yes
-omarchy restart shell
+# `plugin add` clones Git HEAD, which would silently omit working-tree changes.
+# Snapshot the exact source under test into a disposable repository first.
+plugin_source=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-kids-menu-source.XXXXXX")
+tar -C "$PLUGIN_ROOT" --exclude='./.git' --exclude='./test-results' -cf - . \
+  | tar -C "$plugin_source" -xf -
+git -C "$plugin_source" init -q
+git -C "$plugin_source" add -A
+git -C "$plugin_source" \
+  -c user.name='Kids Menu acceptance' \
+  -c user.email='acceptance@localhost' \
+  commit -qm 'Acceptance source snapshot'
+
+omarchy plugin add "file://$plugin_source" --enable --yes
 wait_until "standalone kids plugin becomes active" 20 plugin_enabled
 wait_until "normal Omarchy menu symbol remains on the left" 20 menu_symbol_on_left
 wait_until "separate Kids manager appears on the right" 20 manager_on_right
@@ -781,6 +810,4 @@ wait_until "restored stock menu closes" 15 layer_absent
 
 trap - EXIT
 cleanup
-hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_address\" })" >/dev/null
-hyprctl dispatch "hl.dsp.window.close({ window = \"address:$adult_second_address\" })" >/dev/null
 pass "Kids Menu VM acceptance passed"

@@ -1,17 +1,41 @@
 #!/bin/bash
 
 set -Eeuo pipefail
+umask 077
 
 WINDOW_SESSION=${1:?window-session path is required}
 SHORTCUT_POLICY=${2:?shortcut-policy path is required}
+NOTIFICATION_STATE=${3:-}
+OMARCHY_PATH=${4:-${OMARCHY_PATH:-/usr/share/omarchy}}
+OMARCHY_SHELL=${OMARCHY_KIDS_OMARCHY_SHELL:-omarchy-shell}
 SETTLE_SECONDS=${OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS:-2}
 RETRY_SECONDS=${OMARCHY_KIDS_CLEANUP_RETRY_SECONDS:-1}
 MAX_ATTEMPTS=${OMARCHY_KIDS_CLEANUP_MAX_ATTEMPTS:-30}
+
+export OMARCHY_PATH
 
 [[ -x $WINDOW_SESSION && -x $SHORTCUT_POLICY ]]
 [[ $SETTLE_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || SETTLE_SECONDS=2
 [[ $RETRY_SECONDS =~ ^[0-9]+([.][0-9]+)?$ ]] || RETRY_SECONDS=1
 [[ $MAX_ATTEMPTS =~ ^[1-9][0-9]*$ ]] || MAX_ATTEMPTS=30
+
+restore_notifications() {
+  local restore state_tmp
+  [[ -n $NOTIFICATION_STATE && -f $NOTIFICATION_STATE ]] || return 0
+  restore=$(jq -er '
+    if .version == 1 and .managed == true and (.restoreDnd | type) == "boolean"
+    then if .restoreDnd then "on" else "off" end
+    else empty
+    end
+  ' "$NOTIFICATION_STATE") || return 0
+
+  "$OMARCHY_SHELL" notifications setDnd "$restore" >/dev/null
+  [[ $("$OMARCHY_SHELL" notifications isDnd) == "$restore" ]] || return 1
+
+  state_tmp=$(mktemp "$(dirname -- "$NOTIFICATION_STATE")/.notifications.XXXXXX")
+  jq -n '{version: 1, managed: false, restoreDnd: false}' >"$state_tmp"
+  mv -- "$state_tmp" "$NOTIFICATION_STATE"
+}
 
 # Component destruction cannot await a Process. Give any execDetached launch a
 # short mapping window, then retry window/workspace cleanup while a late-mapping
@@ -23,7 +47,10 @@ attempt=0
 while ((attempt < MAX_ATTEMPTS)); do
   attempt=$((attempt + 1))
   if "$WINDOW_SESSION" exit >/dev/null; then
-    exec "$SHORTCUT_POLICY" exit
+    if shortcut_result=$("$SHORTCUT_POLICY" exit) && restore_notifications; then
+      printf '%s\n' "$shortcut_result"
+      exit 0
+    fi
   fi
   if ((attempt < MAX_ATTEMPTS)); then
     sleep "$RETRY_SECONDS"
@@ -32,10 +59,10 @@ done
 
 # Keep the failed window snapshot for a later recovery attempt, but do not leave
 # plugin-owned shortcut restrictions active after the plugin itself is gone.
-if "$SHORTCUT_POLICY" exit >/dev/null; then
-  printf 'Kids Menu removal could not restore every window; shortcut restrictions were released.\n' >&2
+if "$SHORTCUT_POLICY" exit >/dev/null && restore_notifications; then
+  printf 'Kids Menu removal could not restore every window; shortcut restrictions were released and notification state was restored.\n' >&2
 else
-  printf 'Kids Menu removal could not restore windows or shortcuts; see shortcut-restore.json for details.\n' >&2
+  printf 'Kids Menu removal could not restore every desktop control; see saved recovery state for details.\n' >&2
 fi
 
 exit 1

@@ -1640,22 +1640,28 @@ Item {
 
   Component.onDestruction: {
     if (root.pluginRegistry && !root.pluginRegistry.isEnabled(root.pluginId)) {
+      var notificationCleanupDetached = false
       if (root.lifecycleCleanupTool && root.windowSessionTool && root.shortcutPolicyTool) {
         Quickshell.execDetached([
           root.lifecycleCleanupTool,
           root.windowSessionTool,
-          root.shortcutPolicyTool
+          root.shortcutPolicyTool,
+          root.notificationStatePath,
+          root.omarchyPath
         ])
+        notificationCleanupDetached = true
       } else {
         if (root.windowSessionTool)
           Quickshell.execDetached([root.windowSessionTool, "exit"])
         if (root.shortcutPolicyTool)
           Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
       }
-      try {
-        root.releaseNotificationPolicy()
-      } catch (error) {
-        console.warn("omarchy-kids: could not restore notifications during removal: " + error)
+      if (!notificationCleanupDetached) {
+        try {
+          root.releaseNotificationPolicy()
+        } catch (error) {
+          console.warn("omarchy-kids: could not restore notifications during removal: " + error)
+        }
       }
       try {
         root.releaseShellIntegration()

@@ -48,15 +48,15 @@ profile_pid() {
   target=$(readlink -- "$PROFILE_DIR/SingletonLock") || return 1
   pid=${target##*-}
   [[ $pid =~ ^[1-9][0-9]*$ && -r $PROC_ROOT/$pid/cmdline ]] || return 1
-  cmdline=$(tr '\0' '\n' <"$PROC_ROOT/$pid/cmdline")
-  grep -Fxq -- "--user-data-dir=$PROFILE_DIR" <<<"$cmdline" || return 1
+  cmdline=$(tr '\0' ' ' <"$PROC_ROOT/$pid/cmdline")
+  [[ " $cmdline " == *" --user-data-dir=$PROFILE_DIR "* ]] || return 1
   printf '%s\n' "$pid"
 }
 
 running_mode_matches() {
-  local pid=$1
-  tr '\0' '\n' <"$PROC_ROOT/$pid/cmdline" \
-    | grep -Fxq -- "--omarchy-kids-web-protection=$TOKEN"
+  local pid=$1 cmdline
+  cmdline=$(tr '\0' ' ' <"$PROC_ROOT/$pid/cmdline")
+  [[ " $cmdline " == *" --omarchy-kids-web-protection=$TOKEN "* ]]
 }
 
 has_conflicting_dns_policy() {
