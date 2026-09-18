@@ -10,13 +10,14 @@ WINDOW_SESSION="$PLUGIN_ROOT/window-session"
 SHORTCUT_POLICY="$PLUGIN_ROOT/shortcut-policy"
 LIFECYCLE_CLEANUP="$PLUGIN_ROOT/lifecycle-cleanup"
 BROWSER_PROTECTION="$PLUGIN_ROOT/browser-protection"
+NOTIFICATION_POLICY="$PLUGIN_ROOT/notification-policy"
 
 bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
   "$PLUGIN_ROOT/test/hyprctl-mock" "$PLUGIN_ROOT/test/keybindings-mock" \
   "$PLUGIN_ROOT/test/window-hyprctl-mock" \
   "$PLUGIN_ROOT/test/notification-shell-mock" \
   "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP" \
-  "$BROWSER_PROTECTION"
+  "$BROWSER_PROTECTION" "$NOTIFICATION_POLICY"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -52,7 +53,7 @@ jq -e '
   .description == "Supervised kids mode for shared computers, with chosen apps and family-filtered web browsing." and
   .kinds == ["menu", "bar-widget", "service"] and
   .entryPoints.menu == "Menu.qml" and
-  .entryPoints.barWidget == "BarWidget.qml" and
+  .entryPoints.barWidget == "ManagerWidget.qml" and
   .entryPoints.service == "Service.qml" and
   .barWidget.displayName == "Kids Menu" and
   .barWidget.description == "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Menu is active." and
@@ -251,8 +252,8 @@ const assert = require("node:assert/strict")
 const integration = require(process.argv[2])
 
 const pluginId = "io.github.elgevan.kids-menu"
-const managerId = pluginId + ".manager"
-const managerPath = "/plugins/omarchy-kids/ManagerWidget.qml"
+const menuId = pluginId + ".menu"
+const menuPath = "/plugins/omarchy-kids/BarWidget.qml"
 const config = {
   version: 1,
   bar: {
@@ -269,18 +270,18 @@ const config = {
   plugins: []
 }
 
-let result = integration.activate(config, pluginId, managerId, managerPath, true)
-assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+let result = integration.activate(config, pluginId, menuId, menuPath, true)
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [menuId, "omarchy.workspaces"])
 assert.deepEqual(config.bar.layout.center, [])
 assert.deepEqual(
   config.bar.layout.right.map(integration.entryId),
-  [managerId, ...integration.KIDS_CONTROL_IDS]
+  [pluginId, ...integration.KIDS_CONTROL_IDS]
 )
-assert.equal(config.bar.layout.left[0].kidsMenuRestore.entry.custom, "preserved")
+assert.equal(config.bar.layout.right[0].kidsMenuRestore.entry.custom, "preserved")
 assert.deepEqual(config.bar.layout.right[3], {id: "omarchy.audio", step: 3})
-assert.equal(config.bar.layout.right[0].source, managerPath)
+assert.equal(config.bar.layout.left[0].source, menuPath)
 assert.deepEqual(
-  config.bar.layout.left[0].kidsBarLayoutRestore.center,
+  config.bar.layout.right[0].kidsBarLayoutRestore.center,
   [{id: "omarchy.clock", format: "HH:mm"}]
 )
 assert.deepEqual(config.disabledPlugins, ["omarchy.menu"])
@@ -290,36 +291,36 @@ assert.deepEqual(result.restore, {
   entry: {id: "omarchy.menu", custom: "preserved"}
 })
 assert.deepEqual(result.barRestore.right.map(integration.entryId), [
-  "omarchy.tray", managerId, "omarchy.audio"
+  "omarchy.tray", pluginId, "omarchy.audio"
 ])
 
 const firstBarRestore = JSON.parse(JSON.stringify(result.barRestore))
-result = integration.activate(config, pluginId, managerId, managerPath, true)
+result = integration.activate(config, pluginId, menuId, menuPath, true)
 assert.deepEqual(result.barRestore, firstBarRestore)
-assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [menuId, "omarchy.workspaces"])
 assert.deepEqual(
   config.bar.layout.right.map(integration.entryId),
-  [managerId, ...integration.KIDS_CONTROL_IDS]
+  [pluginId, ...integration.KIDS_CONTROL_IDS]
 )
 
-result = integration.activate(config, pluginId, managerId, managerPath, false)
-assert.deepEqual(config.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+result = integration.activate(config, pluginId, menuId, menuPath, false)
+assert.deepEqual(config.bar.layout.left.map(integration.entryId), [menuId, "omarchy.workspaces"])
 assert.deepEqual(config.bar.layout.center, [{id: "omarchy.clock", format: "HH:mm"}])
 assert.deepEqual(config.bar.layout.right.map(integration.entryId), [
-  "omarchy.tray", managerId, "omarchy.audio"
+  "omarchy.tray", pluginId, "omarchy.audio"
 ])
 assert.equal(config.bar.layout.right[2].step, 3)
-assert.equal(config.bar.layout.left[0].kidsBarLayoutRestore, undefined)
+assert.equal(config.bar.layout.right[1].kidsBarLayoutRestore, undefined)
 assert.equal(config.disabledPlugins, undefined)
 assert.equal(result.barRestore, null)
 
-config.bar.layout.left = config.bar.layout.left.filter(entry => integration.entryId(entry) !== pluginId)
-integration.deactivate(config, pluginId, managerId, result.restore, result.barRestore)
+config.bar.layout.right = config.bar.layout.right.filter(entry => integration.entryId(entry) !== pluginId)
+integration.deactivate(config, pluginId, menuId, result.restore, result.barRestore)
 assert.deepEqual(config.bar.layout.left.map(integration.entryId), ["omarchy.menu", "omarchy.workspaces"])
 assert.equal(config.bar.layout.left[0].custom, "preserved")
 assert.deepEqual(config.bar.layout.center, [{id: "omarchy.clock", format: "HH:mm"}])
 assert.deepEqual(config.bar.layout.right, [{id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}])
-assert.equal(integration.barLocation(config, managerId), null)
+assert.equal(integration.barLocation(config, menuId), null)
 assert.equal(config.disabledPlugins, undefined)
 
 const removalConfig = {
@@ -337,11 +338,11 @@ const removalConfig = {
   },
   plugins: []
 }
-result = integration.activate(removalConfig, pluginId, managerId, managerPath, true)
+result = integration.activate(removalConfig, pluginId, menuId, menuPath, true)
 integration.deactivate(
   removalConfig,
   pluginId,
-  managerId,
+  menuId,
   result.restore,
   result.barRestore
 )
@@ -353,7 +354,7 @@ assert.deepEqual(removalConfig.bar.layout.right, [
   {id: "omarchy.tray"}, {id: "omarchy.audio", step: 3}
 ])
 assert.equal(integration.barLocation(removalConfig, pluginId), null)
-assert.equal(integration.barLocation(removalConfig, managerId), null)
+assert.equal(integration.barLocation(removalConfig, menuId), null)
 assert.equal(removalConfig.disabledPlugins, undefined)
 
 const customConfig = {
@@ -367,12 +368,12 @@ const customConfig = {
   },
   plugins: []
 }
-result = integration.activate(customConfig, pluginId, managerId, managerPath, true)
-assert.deepEqual(customConfig.bar.layout.left.map(integration.entryId), [pluginId, "eelg.workspaces"])
+result = integration.activate(customConfig, pluginId, menuId, menuPath, true)
+assert.deepEqual(customConfig.bar.layout.left.map(integration.entryId), [menuId, "eelg.workspaces"])
 assert.deepEqual(customConfig.bar.layout.left[1], {id: "eelg.workspaces", showEmpty: true})
 assert.deepEqual(
   customConfig.bar.layout.right.map(integration.entryId),
-  [managerId, ...integration.KIDS_CONTROL_IDS]
+  [pluginId, ...integration.KIDS_CONTROL_IDS]
 )
 assert.equal(result.restore.index, 1)
 
@@ -402,12 +403,12 @@ const policyConfig = {
   disabledPlugins: ["omarchy.audio", "omarchy.emojis"]
 }
 result = integration.activate(
-  policyConfig, pluginId, managerId, managerPath, true, installedPlugins)
+  policyConfig, pluginId, menuId, menuPath, true, installedPlugins)
 assert.deepEqual(policyConfig.plugins, [])
-assert.deepEqual(policyConfig.bar.layout.left.map(integration.entryId), [pluginId, "eelg.workspaces"])
+assert.deepEqual(policyConfig.bar.layout.left.map(integration.entryId), [menuId, "eelg.workspaces"])
 assert.deepEqual(
   policyConfig.bar.layout.right.map(integration.entryId),
-  [managerId, ...integration.KIDS_CONTROL_IDS]
+  [pluginId, ...integration.KIDS_CONTROL_IDS]
 )
 assert.equal(policyConfig.disabledPlugins.includes("omarchy.audio"), false)
 assert.deepEqual(policyConfig.disabledPlugins.slice().sort(), [
@@ -416,13 +417,13 @@ assert.deepEqual(policyConfig.disabledPlugins.slice().sort(), [
 ])
 assert.equal(
   integration.kidsPluginPolicyMatches(
-    policyConfig, installedPlugins, pluginId, managerId),
+    policyConfig, installedPlugins, pluginId, menuId),
   true
 )
 policyConfig.bar.layout.right.unshift({id: "third.party.widget"})
 assert.equal(
   integration.kidsPluginPolicyMatches(
-    policyConfig, installedPlugins, pluginId, managerId),
+    policyConfig, installedPlugins, pluginId, menuId),
   false
 )
 policyConfig.bar.layout.right.shift()
@@ -431,13 +432,13 @@ policyConfig.disabledPlugins = policyConfig.disabledPlugins.filter(
 )
 assert.equal(
   integration.kidsPluginPolicyMatches(
-    policyConfig, installedPlugins, pluginId, managerId),
+    policyConfig, installedPlugins, pluginId, menuId),
   false
 )
 integration.applyKidsPluginPolicy(policyConfig, installedPlugins, pluginId)
 assert.equal(
   integration.kidsPluginPolicyMatches(
-    policyConfig, installedPlugins, pluginId, managerId),
+    policyConfig, installedPlugins, pluginId, menuId),
   true
 )
 assert.deepEqual(result.barRestore.plugins, [
@@ -453,11 +454,11 @@ assert.deepEqual(
 )
 const firstPolicyRestore = JSON.parse(JSON.stringify(result.barRestore))
 result = integration.activate(
-  policyConfig, pluginId, managerId, managerPath, true, installedPlugins)
+  policyConfig, pluginId, menuId, menuPath, true, installedPlugins)
 assert.deepEqual(result.barRestore, firstPolicyRestore)
 assert.deepEqual(policyConfig.plugins, [])
 result = integration.activate(
-  policyConfig, pluginId, managerId, managerPath, false, installedPlugins)
+  policyConfig, pluginId, menuId, menuPath, false, installedPlugins)
 assert.deepEqual(policyConfig.plugins, [
   {id: "third.party.panel", setting: "preserved"}
 ])
@@ -465,7 +466,7 @@ assert.deepEqual(policyConfig.disabledPlugins, ["omarchy.audio", "omarchy.emojis
 assert.deepEqual(policyConfig.bar.layout.center, [{id: "omarchy.clock"}])
 assert.deepEqual(
   policyConfig.bar.layout.right.map(integration.entryId),
-  [managerId, "third.party.widget", "omarchy.audio"]
+  [pluginId, "third.party.widget", "omarchy.audio"]
 )
 
 const exemptableIds = integration.exemptablePluginOptions(
@@ -489,21 +490,21 @@ const exemptionConfig = {
   disabledPlugins: ["omarchy.audio", "omarchy.emojis", "omarchy.media"]
 }
 result = integration.activate(
-  exemptionConfig, pluginId, managerId, managerPath, true,
+  exemptionConfig, pluginId, menuId, menuPath, true,
   installedPlugins, exemptions)
 assert.deepEqual(exemptionConfig.plugins, [
   {id: "third.party.panel", setting: "preserved"}
 ])
 assert.deepEqual(
   exemptionConfig.bar.layout.left.map(integration.entryId),
-  [pluginId, "eelg.workspaces"]
+  [menuId, "eelg.workspaces"]
 )
 assert.deepEqual(exemptionConfig.bar.layout.center, [
   {id: "omarchy.clock", format: "HH:mm"}
 ])
 assert.deepEqual(
   exemptionConfig.bar.layout.right.map(integration.entryId),
-  [managerId, ...integration.KIDS_CONTROL_IDS, "third.party.widget"]
+  [pluginId, ...integration.KIDS_CONTROL_IDS, "third.party.widget"]
 )
 assert.deepEqual(exemptionConfig.bar.layout.right.at(-1), {
   id: "third.party.widget", compact: true
@@ -513,7 +514,7 @@ assert.deepEqual(exemptionConfig.disabledPlugins.slice().sort(), [
   "omarchy.menu", "omarchy.osd"
 ])
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), true)
 assert.deepEqual(integration.exemptablePluginOptions(
   installedPlugins, pluginId, exemptionConfig).map(option => option.id),
   ["third.party.widget"])
@@ -524,18 +525,18 @@ assert.deepEqual(integration.hiddenPluginIds(
 
 exemptionConfig.bar.layout.right.pop()
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), false)
 result = integration.activate(
-  exemptionConfig, pluginId, managerId, managerPath, true,
+  exemptionConfig, pluginId, menuId, menuPath, true,
   installedPlugins, exemptions)
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), true)
 
 exemptionConfig.plugins = []
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), false)
 result = integration.activate(
-  exemptionConfig, pluginId, managerId, managerPath, true,
+  exemptionConfig, pluginId, menuId, menuPath, true,
   installedPlugins, exemptions)
 assert.deepEqual(exemptionConfig.plugins, [
   {id: "third.party.panel", setting: "preserved"}
@@ -543,14 +544,14 @@ assert.deepEqual(exemptionConfig.plugins, [
 
 exemptionConfig.disabledPlugins.push("omarchy.clock")
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), false)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), false)
 integration.applyKidsPluginPolicy(
   exemptionConfig, installedPlugins, pluginId, exemptions, result.barRestore)
 assert.equal(integration.kidsPluginPolicyMatches(
-  exemptionConfig, installedPlugins, pluginId, managerId, exemptions), true)
+  exemptionConfig, installedPlugins, pluginId, menuId, exemptions), true)
 
 result = integration.activate(
-  exemptionConfig, pluginId, managerId, managerPath, false,
+  exemptionConfig, pluginId, menuId, menuPath, false,
   installedPlugins, exemptions)
 assert.deepEqual(exemptionConfig.plugins, [
   {id: "third.party.panel", setting: "preserved"}
@@ -560,11 +561,12 @@ assert.deepEqual(exemptionConfig.disabledPlugins,
 assert.deepEqual(exemptionConfig.bar.layout.center, [
   {id: "omarchy.clock", format: "HH:mm"}
 ])
-assert.deepEqual(exemptionConfig.bar.layout.right, [
-  {id: managerId, type: "qml", source: managerPath},
-  {id: "third.party.widget", compact: true},
-  {id: "omarchy.audio"}
+assert.deepEqual(exemptionConfig.bar.layout.right.map(integration.entryId), [
+  pluginId, "third.party.widget", "omarchy.audio"
 ])
+assert.deepEqual(exemptionConfig.bar.layout.right[1], {
+  id: "third.party.widget", compact: true
+})
 
 const policyRemovalConfig = {
   version: 1,
@@ -579,11 +581,11 @@ const policyRemovalConfig = {
   disabledPlugins: ["omarchy.audio", "omarchy.emojis"]
 }
 result = integration.activate(
-  policyRemovalConfig, pluginId, managerId, managerPath, true, installedPlugins)
+  policyRemovalConfig, pluginId, menuId, menuPath, true, installedPlugins)
 integration.deactivate(
   policyRemovalConfig,
   pluginId,
-  managerId,
+  menuId,
   result.restore,
   result.barRestore
 )
@@ -604,13 +606,13 @@ const noStockConfig = {
   bar: {layout: {left: [{id: pluginId}], center: [], right: []}},
   plugins: []
 }
-result = integration.activate(noStockConfig, pluginId, managerId, managerPath, true)
+result = integration.activate(noStockConfig, pluginId, menuId, menuPath, true)
 assert.equal(result.restore, null)
-assert.deepEqual(noStockConfig.bar.layout.left.map(integration.entryId), [pluginId, "omarchy.workspaces"])
+assert.deepEqual(noStockConfig.bar.layout.left.map(integration.entryId), [menuId, "omarchy.workspaces"])
 integration.deactivate(
   noStockConfig,
   pluginId,
-  managerId,
+  menuId,
   result.restore,
   result.barRestore
 )
@@ -633,13 +635,13 @@ for (const stockPresent of [false, true]) {
     originalLayout.left = originalLayout.left.filter(entry => entry.id !== pluginId)
     for (const active of [false, false, true, true, ...(removalWhileActive ? [] : [false, false])]) {
       result = integration.activate(
-        disabledMenuConfig, pluginId, managerId, managerPath, active)
+        disabledMenuConfig, pluginId, menuId, menuPath, active)
       // Simulate loading the persisted shell configuration in a fresh instance.
       disabledMenuConfig = JSON.parse(JSON.stringify(disabledMenuConfig))
       assert.deepEqual(disabledMenuConfig.disabledPlugins, ["omarchy.menu", "omarchy.clock"])
     }
     integration.deactivate(
-      disabledMenuConfig, pluginId, managerId, result.restore, result.barRestore)
+      disabledMenuConfig, pluginId, menuId, result.restore, result.barRestore)
     assert.deepEqual(disabledMenuConfig.disabledPlugins, ["omarchy.menu", "omarchy.clock"])
     assert.deepEqual(disabledMenuConfig.bar.layout, originalLayout)
   }
@@ -907,6 +909,44 @@ rm -rf -- "$browser_protection_dir"
 [[ -x $SHORTCUT_POLICY ]] || fail "shortcut-policy helper is not executable"
 [[ -x $LIFECYCLE_CLEANUP ]] || fail "lifecycle-cleanup helper is not executable"
 [[ -x $BROWSER_PROTECTION ]] || fail "browser-protection helper is not executable"
+[[ -x $NOTIFICATION_POLICY ]] || fail "notification-policy helper is not executable"
+
+notification_policy_dir=$(mktemp -d)
+notification_policy_state=$notification_policy_dir/notifications.json
+notification_policy_dnd=$notification_policy_dir/dnd
+printf 'off\n' >"$notification_policy_dnd"
+notification_result=$(
+  OMARCHY_KIDS_OMARCHY_SHELL="$PLUGIN_ROOT/test/notification-shell-mock" \
+  OMARCHY_KIDS_TEST_DND_STATE="$notification_policy_dnd" \
+  XDG_RUNTIME_DIR="$notification_policy_dir/runtime" \
+    "$NOTIFICATION_POLICY" enter "$notification_policy_state"
+)
+jq -e '.applied == true and .restoreDnd == false' \
+    <<<"$notification_result" >/dev/null \
+  && [[ $(<"$notification_policy_dnd") == on ]] \
+  && jq -e '.managed == true and .restoreDnd == false' \
+    "$notification_policy_state" >/dev/null \
+  || fail "notification policy does not save and apply an initial DND-off state"
+notification_result=$(
+  OMARCHY_KIDS_OMARCHY_SHELL="$PLUGIN_ROOT/test/notification-shell-mock" \
+  OMARCHY_KIDS_TEST_DND_STATE="$notification_policy_dnd" \
+  XDG_RUNTIME_DIR="$notification_policy_dir/runtime" \
+    "$NOTIFICATION_POLICY" enter "$notification_policy_state"
+)
+jq -e '.restoreDnd == false' <<<"$notification_result" >/dev/null \
+  || fail "notification policy overwrites its saved restore point"
+notification_result=$(
+  OMARCHY_KIDS_OMARCHY_SHELL="$PLUGIN_ROOT/test/notification-shell-mock" \
+  OMARCHY_KIDS_TEST_DND_STATE="$notification_policy_dnd" \
+  XDG_RUNTIME_DIR="$notification_policy_dir/runtime" \
+    "$NOTIFICATION_POLICY" exit "$notification_policy_state"
+)
+jq -e '.applied == false' <<<"$notification_result" >/dev/null \
+  && [[ $(<"$notification_policy_dnd") == off ]] \
+  && jq -e '.managed == false' "$notification_policy_state" >/dev/null \
+  || fail "notification policy does not restore the saved DND state"
+rm -rf -- "$notification_policy_dir"
+
 rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q '"cp", "--"' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'id: stageRuntimeTools' "$PLUGIN_ROOT/Service.qml" \
@@ -914,6 +954,7 @@ rg -q 'runtimeToolDir: runtimeRoot \+ "/omarchy-kids/tools"' "$PLUGIN_ROOT/Servi
   && rg -q 'shortcutPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'lifecycleCleanupTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -q 'browserProtectionTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
+  && rg -q 'notificationPolicyTool: runtimeToolsReady' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.browserProfileDir,' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.browserPolicyDir' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'tooltipText: "Kids Menu settings"' "$PLUGIN_ROOT/Panel.qml" \
@@ -978,7 +1019,8 @@ rg -Fq 'import Quickshell.Hyprland' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.beginModeStateRecovery(enabled === false ? "inactive" : "unknown")' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'id: windowSessionStatus' "$PLUGIN_ROOT/Service.qml" \
   && rg -Fq 'root.service.authorizeDeactivation()' "$PLUGIN_ROOT/Panel.qml" \
-  && rg -Fq 'String(root.lockService.lastEvent || "") === "unlocked"' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'command: ["omarchy-shell", "lock", "lock"]' "$PLUGIN_ROOT/Panel.qml" \
+  && rg -Fq 'locked === "false" && root.lockObserved' "$PLUGIN_ROOT/Panel.qml" \
   && ! rg -Fq 'root.service.retryTransition()' "$PLUGIN_ROOT/Panel.qml" \
   || fail "mode recovery can bypass event admission or authenticated release"
 window_test_dir=$(mktemp -d)
@@ -1581,9 +1623,17 @@ cleanup_log=$window_cleanup_dir/hyprctl.log
 cleanup_marker=$window_cleanup_dir/client-query.marker
 cleanup_notification_state=$window_cleanup_dir/notifications.json
 cleanup_dnd_state=$window_cleanup_dir/dnd
+cleanup_shell_state=$window_cleanup_dir/shell-state.json
+cleanup_shell_config=$window_cleanup_dir/shell.json
 printf '%s\n' '{"version":1,"managed":true,"restoreDnd":false}' \
   >"$cleanup_notification_state"
 printf '%s\n' on >"$cleanup_dnd_state"
+cat >"$cleanup_shell_state" <<'JSON'
+{"version":1,"stockMenuRestore":{"section":"left","index":0,"entry":{"id":"omarchy.menu","custom":true}},"barLayoutRestore":{"left":[{"id":"io.github.elgevan.kids-menu"},{"id":"omarchy.workspaces"}],"center":[{"id":"omarchy.clock"}],"right":[{"id":"io.github.elgevan.kids-menu.manager"},{"id":"omarchy.audio"}],"plugins":[{"id":"third.party.panel"}],"disabledPlugins":["omarchy.emojis"]}}
+JSON
+cat >"$cleanup_shell_config" <<'JSON'
+{"version":1,"bar":{"layout":{"left":[{"id":"io.github.elgevan.kids-menu"},{"id":"omarchy.workspaces"}],"center":[],"right":[{"id":"io.github.elgevan.kids-menu.manager"},{"id":"omarchy.audio"}]}},"plugins":[],"disabledPlugins":["omarchy.menu","omarchy.clock"]}
+JSON
 HYPRLAND_INSTANCE_SIGNATURE=test-instance \
   XDG_STATE_HOME="$window_cleanup_dir" \
   OMARCHY_KIDS_HYPRCTL="$window_mock" \
@@ -1610,7 +1660,10 @@ window_result=$(
     OMARCHY_KIDS_TEST_DND_STATE="$cleanup_dnd_state" \
     OMARCHY_KIDS_TEST_EXPECT_OMARCHY_PATH="$PLUGIN_ROOT/test-omarchy" \
     "$LIFECYCLE_CLEANUP" "$WINDOW_SESSION" "$SHORTCUT_POLICY" \
-      "$cleanup_notification_state" "$PLUGIN_ROOT/test-omarchy"
+      "$cleanup_notification_state" "$PLUGIN_ROOT/test-omarchy" \
+      "$cleanup_shell_state" "$cleanup_shell_config" \
+      io.github.elgevan.kids-menu io.github.elgevan.kids-menu.manager \
+      "$window_cleanup_dir/removed-plugin/manifest.json"
 )
 jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null \
   && jq -e '.active == false and .status == "restored"
@@ -1619,6 +1672,13 @@ jq -e '.action == "exit" and .applied == false' <<< "$window_result" >/dev/null 
   && [[ $(<"$cleanup_dnd_state") == off ]] \
   && jq -e '.managed == false and .restoreDnd == false' \
     "$cleanup_notification_state" >/dev/null \
+  && jq -e '
+    .bar.layout.left == [{"id":"omarchy.menu","custom":true},{"id":"omarchy.workspaces"}]
+    and .bar.layout.center == [{"id":"omarchy.clock"}]
+    and .bar.layout.right == [{"id":"omarchy.audio"}]
+    and .plugins == [{"id":"third.party.panel"}]
+    and .disabledPlugins == ["omarchy.emojis"]
+  ' "$cleanup_shell_config" >/dev/null \
   || fail "detached lifecycle cleanup does not order verified exit before shortcut release"
 
 window_cleanup_refusal_dir=$(mktemp -d)
@@ -1991,6 +2051,13 @@ rg -Fq 'id: appGrid' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'text: "SELECTED · " + root.installedAllowedCount' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'return "START WITH " + root.selectedAppsLabel()' "$PLUGIN_ROOT/Panel.qml" \
   || fail "the app picker is not the searchable tile-first flow with selected-app review"
+
+rg -Fq 'ServiceBridge.publish(root)' "$PLUGIN_ROOT/Service.qml" \
+  && rg -Fq 'ServiceBridge.current()' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -Fq 'ServiceBridge.current()' "$PLUGIN_ROOT/ManagerWidget.qml" \
+  && rg -Fq 'root.allowlistService.appLibrary' "$PLUGIN_ROOT/Menu.qml" \
+  && rg -Fq 'readonly property var appLibrary: localAppLibrary' "$PLUGIN_ROOT/Service.qml" \
+  || fail "visual entry points do not survive scoped shell capability replacement"
 
 rg -Fq 'id: settingsScroll' "$PLUGIN_ROOT/Panel.qml" \
   && rg -Fq 'contentHeight: settingsPage.implicitHeight' "$PLUGIN_ROOT/Panel.qml" \

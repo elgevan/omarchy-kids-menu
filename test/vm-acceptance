@@ -5,8 +5,22 @@
 
 set -Eeuo pipefail
 
+export OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(find "$XDG_RUNTIME_DIR/hypr" \
+    -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -1)
+  export HYPRLAND_INSTANCE_SIGNATURE
+fi
+if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+  WAYLAND_DISPLAY=$(systemctl --user show-environment 2>/dev/null \
+    | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)
+  export WAYLAND_DISPLAY
+fi
+
 PLUGIN_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PLUGIN_ID=io.github.elgevan.kids-menu
+MENU_WIDGET_ID=$PLUGIN_ID.menu
 ARTIFACTS=${OMARCHY_KIDS_ACCEPTANCE_DIR:-/tmp/omarchy-kids-menu-acceptance}
 ALLOWLIST="$HOME/.config/omarchy-kids/allowed-apps.json"
 MODE_STATE="$HOME/.config/omarchy-kids/mode.json"
@@ -130,35 +144,35 @@ kids_menu_summon() {
 }
 
 menu_symbol_on_left() {
-  jq -e --arg id "$PLUGIN_ID" '
+  jq -e --arg id "$MENU_WIDGET_ID" '
     any(.bar.layout.left[]?; ((if type == "object" then .id else . end) == $id))
   ' "$HOME/.config/omarchy/shell.json"
 }
 
 manager_on_right() {
-  jq -e --arg id "$MANAGER_ID" '
+  jq -e --arg id "$PLUGIN_ID" '
     any(.bar.layout.right[]?;
-      type == "object" and .id == $id and .type == "qml" and (.source | endswith("/ManagerWidget.qml")))
+      ((if type == "object" then .id else . end) == $id))
   ' "$HOME/.config/omarchy/shell.json"
 }
 
 manager_absent() {
-  jq -e --arg id "$MANAGER_ID" '
+  jq -e --arg id "$MENU_WIDGET_ID" '
     [.bar.layout.left[]?, .bar.layout.center[]?, .bar.layout.right[]?]
     | all((if type == "object" then .id else . end) != $id)
   ' "$HOME/.config/omarchy/shell.json"
 }
 
 kids_bar_is_limited() {
-  jq -e --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
+  jq -e --arg plugin "$PLUGIN_ID" --arg menu "$MENU_WIDGET_ID" '
     def entry_id: if type == "object" then (.id // "") else . end;
     ([.bar.layout.left[]? | entry_id] as $left
       | ($left | length) == 2
-        and $left[0] == $plugin
+        and $left[0] == $menu
         and ($left[1] == "omarchy.workspaces" or ($left[1] | endswith(".workspaces")))) and
     ([.bar.layout.center[]? | entry_id] == []) and
     ([.bar.layout.right[]? | entry_id] == [
-      $manager,
+      $plugin,
       "omarchy.bluetooth",
       "omarchy.network",
       "omarchy.audio",
@@ -196,16 +210,16 @@ visible_kids_bar_is_limited() {
     .bar.layout.left[1] | entry_id
   ' "$HOME/.config/omarchy/shell.json")
   omarchy-shell shell debugBarGeometry | jq -e \
-    --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" \
+    --arg plugin "$PLUGIN_ID" --arg menu "$MENU_WIDGET_ID" \
     --arg workspace "$workspace_id" '
       ([.[] | select(.visible == true and .itemVisible == true) | .id]
        | unique) as $visible
-      | ([$plugin, $workspace, $manager,
+      | ([$menu, $workspace, $plugin,
           "omarchy.bluetooth", "omarchy.network", "omarchy.audio",
           "omarchy.monitor", "omarchy.power"]) as $allowed
       | (($visible - $allowed) | length) == 0
         and ($visible | index($plugin)) != null
-        and ($visible | index($manager)) != null
+        and ($visible | index($menu)) != null
     '
 }
 
@@ -580,7 +594,6 @@ if command -v omarchy-theme-switcher >/dev/null || command -v omarchy-theme-bg-s
 else
   wait_until "Style is omitted without Omarchy style tools" 15 screen_lacks Style
 fi
-
 while IFS='|' read -r id label; do
   if desktop_present "$id"; then
     wait_until "installed default $label is visible" 15 screen_contains "$label"

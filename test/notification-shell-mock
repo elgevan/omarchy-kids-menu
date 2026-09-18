@@ -16,6 +16,9 @@ case "${1:-} ${2:-}" in
   "notifications isDnd")
     cat "$STATE"
     ;;
+  "shell reloadConfig")
+    printf 'ok\n'
+    ;;
   *)
     printf 'unexpected omarchy-shell mock call: %s\n' "$*" >&2
     exit 1

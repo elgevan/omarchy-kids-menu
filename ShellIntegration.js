@@ -344,9 +344,9 @@ function appendExemptBarEntries(layout, restore, pluginId, exemptPluginIds) {
 function kidsBarLayout(restore, pluginId, managerId, managerPath,
                        exemptPluginIds) {
   var layout = {
-    left: [{id: pluginId}, workspacesEntryFromLayout(restore)],
+    left: [managerEntry(managerId, managerPath), workspacesEntryFromLayout(restore)],
     center: [],
-    right: [managerEntry(managerId, managerPath)]
+    right: [{id: pluginId}]
   }
   for (var i = 0; i < KIDS_CONTROL_IDS.length; i++)
     layout.right.push(entryFromLayout(restore, KIDS_CONTROL_IDS[i]))
@@ -360,10 +360,10 @@ function applyKidsBarLayout(config, pluginId, managerId, managerPath, restore,
   var layout = kidsBarLayout(
     restore, pluginId, managerId, managerPath, exemptPluginIds)
   var pluginEntry = pluginLocation && isObject(pluginLocation.entry)
-    ? cloneJson(pluginLocation.entry) : layout.left[0]
+    ? cloneJson(pluginLocation.entry) : layout.right[0]
   pluginEntry.id = pluginId
   pluginEntry[BAR_RESTORE_KEY] = cloneJson(restore)
-  layout.left[0] = pluginEntry
+  layout.right[0] = pluginEntry
   config.bar.layout.left = layout.left
   config.bar.layout.center = layout.center
   config.bar.layout.right = layout.right
@@ -388,13 +388,8 @@ function managerEntry(managerId, managerPath) {
   return { id: managerId, type: "qml", source: managerPath }
 }
 
-function ensureManager(config, managerId, managerPath) {
-  var existing = barLocation(config, managerId)
-  if (existing) {
-    config.bar.layout[existing.section][existing.index] = managerEntry(managerId, managerPath)
-    return
-  }
-
+function ensureRegisteredManager(config, pluginId, pluginEntry) {
+  removeBarEntries(config, pluginId)
   var right = config.bar.layout.right
   var insertAt = 0
   for (var i = 0; i < right.length; i++) {
@@ -403,7 +398,7 @@ function ensureManager(config, managerId, managerPath) {
       break
     }
   }
-  right.splice(insertAt, 0, managerEntry(managerId, managerPath))
+  right.splice(insertAt, 0, pluginEntry)
 }
 
 // Replace the stock menu's bar slot while the plugin is enabled. In Kids Menu,
@@ -424,6 +419,14 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled,
   var restore = normalizedRestore(pluginEntry[RESTORE_KEY])
   var barRestore = upgradeBarRestore(
     normalizedBarRestore(pluginEntry[BAR_RESTORE_KEY]), config)
+
+  // Leaving Kids Menu restores the complete inactive layout captured at
+  // entry. It already contains the inline menu button and registered manager.
+  if (kidsModeEnabled !== true && barRestore) {
+    restoreBarLayout(config, barRestore, pluginId)
+    return { restore: restore, barRestore: null }
+  }
+
   var stockLocation = barLocation(config, STOCK_MENU_ID)
   if (!restore && stockLocation) {
     var restoreIndex = stockLocation.index
@@ -439,31 +442,30 @@ function activate(config, pluginId, managerId, managerPath, kidsModeEnabled,
     }
   }
 
-  if (stockLocation) {
-    removeBarEntries(config, pluginId)
-    removeBarEntries(config, STOCK_MENU_ID)
-    if (restore) pluginEntry[RESTORE_KEY] = cloneJson(restore)
-    var destination = restore || {
-      section: stockLocation.section,
-      index: stockLocation.index,
-      entry: { id: STOCK_MENU_ID }
-    }
+  var destination = restore || (stockLocation ? {
+    section: stockLocation.section,
+    index: stockLocation.index,
+    entry: { id: STOCK_MENU_ID }
+  } : null)
+  removeBarEntries(config, managerId)
+  removeBarEntries(config, STOCK_MENU_ID)
+  if (restore) pluginEntry[RESTORE_KEY] = cloneJson(restore)
+  if (destination) {
     var target = config.bar.layout[destination.section]
-    target.splice(Math.min(destination.index, target.length), 0, pluginEntry)
-  } else if (restore && isObject(pluginLocation.entry)) {
-    pluginLocation.entry[RESTORE_KEY] = cloneJson(restore)
+    target.splice(
+      Math.min(destination.index, target.length),
+      0,
+      managerEntry(managerId, managerPath)
+    )
   }
+  ensureRegisteredManager(config, pluginId, pluginEntry)
 
-  ensureManager(config, managerId, managerPath)
   if (kidsModeEnabled === true) {
     if (!barRestore) barRestore = barLayoutSnapshot(config)
     applyKidsBarLayout(config, pluginId, managerId, managerPath, barRestore,
       exemptPluginIds)
     applyKidsPluginPolicy(config, installedPlugins, pluginId, exemptPluginIds,
       barRestore)
-  } else if (barRestore) {
-    restoreBarLayout(config, barRestore, pluginId)
-    ensureManager(config, managerId, managerPath)
   }
   // Outside Kids Menu, leave the user's disabled-plugin preferences intact.
   return {

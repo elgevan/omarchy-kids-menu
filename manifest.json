@@ -14,7 +14,7 @@
   "keepLoaded": true,
   "entryPoints": {
     "menu": "Menu.qml",
-    "barWidget": "BarWidget.qml",
+    "barWidget": "ManagerWidget.qml",
     "service": "Service.qml"
   },
   "barWidget": {
@@ -22,6 +22,6 @@
     "description": "Keeps the normal Omarchy menu button and shows only the apps you choose while Kids Menu is active.",
     "category": "Compositor",
     "allowMultiple": false,
-    "defaultSection": "left"
+    "defaultSection": "right"
   }
 }

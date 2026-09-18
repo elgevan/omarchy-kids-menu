@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -15,15 +16,14 @@ Panel {
   property bool settingsOpen: false
   property int installedAllowedCount: 0
   property bool awaitingUnlock: false
+  property bool lockObserved: false
+  property int authenticationPollAttempts: 0
   property string authError: ""
 
   readonly property int appGridColumnCount: 3
 
   readonly property var barIdentity: hostWidget || root
-  readonly property var appLibrary: bar && bar.shell ? bar.shell.appLibrary : null
-  readonly property var lockService: bar && bar.shell && typeof bar.shell.serviceFor === "function"
-    ? bar.shell.serviceFor("omarchy.lock")
-    : null
+  readonly property var appLibrary: root.service ? root.service.appLibrary : null
   readonly property bool allowlistEditable: root.service
     && root.service.allowlistEditable === true
   readonly property string modePhase: root.service
@@ -132,28 +132,35 @@ Panel {
       return
     }
 
-    if (!root.lockService || typeof root.lockService.beginLock !== "function") {
-      root.authError = "Authentication is unavailable"
-      return
-    }
-
+    if (root.awaitingUnlock || authenticationBegin.running) return
     root.awaitingUnlock = true
-    if (!root.lockService.beginLock()) {
-      root.awaitingUnlock = false
-      root.authError = "Could not start authentication"
-      return
-    }
-
-    root.close()
+    root.lockObserved = false
+    root.authenticationPollAttempts = 0
+    authenticationBegin.running = true
   }
 
-  function handleLockEvent() {
-    if (!root.awaitingUnlock || !root.lockService) return
-    if (String(root.lockService.lastEvent || "") === "unlocked") {
+  function finishAuthenticationPoll(exitCode, output) {
+    if (!root.awaitingUnlock) return
+    var locked = String(output || "").trim()
+    if (exitCode !== 0 || (locked !== "true" && locked !== "false")) {
+      root.awaitingUnlock = false
+      root.authError = "Could not verify authentication"
+      return
+    }
+    if (locked === "true") root.lockObserved = true
+    if (locked === "false" && root.lockObserved) {
       root.awaitingUnlock = false
       if (root.service && !root.service.authorizeDeactivation())
         root.authError = "Could not restore the desktop"
+      return
     }
+    root.authenticationPollAttempts++
+    if (root.authenticationPollAttempts >= 1200) {
+      root.awaitingUnlock = false
+      root.authError = "Authentication timed out"
+      return
+    }
+    authenticationPoll.restart()
   }
 
   function modeStatusLabel() {
@@ -200,9 +207,34 @@ Panel {
     function onAllowlistChanged() { root.rebuildApps() }
   }
 
-  Connections {
-    target: root.lockService
-    function onLastEventChanged() { root.handleLockEvent() }
+  Process {
+    id: authenticationBegin
+    command: ["omarchy-shell", "lock", "lock"]
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.awaitingUnlock = false
+        root.authError = "Could not start authentication"
+        return
+      }
+      root.close()
+      authenticationPoll.restart()
+    }
+  }
+
+  Process {
+    id: authenticationStatus
+    command: ["omarchy-shell", "lock", "isLocked"]
+    stdout: StdioCollector { id: authenticationStatusOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishAuthenticationPoll(exitCode, authenticationStatusOutput.text)
+    }
+  }
+
+  Timer {
+    id: authenticationPoll
+    interval: 250
+    onTriggered: if (root.awaitingUnlock && !authenticationStatus.running)
+      authenticationStatus.running = true
   }
 
   KeyboardPanel {

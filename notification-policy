@@ -1,0 +1,62 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+umask 077
+
+ACTION=${1:-}
+STATE=${2:-}
+OMARCHY_SHELL=${OMARCHY_KIDS_OMARCHY_SHELL:-omarchy-shell}
+RUNTIME_ROOT=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}
+LOCK_DIR="$RUNTIME_ROOT/omarchy-kids"
+LOCK="$LOCK_DIR/notification-policy.lock"
+
+[[ $ACTION == enter || $ACTION == exit ]]
+[[ -n $STATE ]]
+mkdir -p -- "$LOCK_DIR" "$(dirname -- "$STATE")"
+exec 9>"$LOCK"
+flock -w 5 9
+
+managed=false
+restore=false
+if [[ -f $STATE ]]; then
+  if parsed=$(jq -er '
+    if .version == 1 and (.managed | type) == "boolean"
+      and (.restoreDnd | type) == "boolean"
+    then [(.managed | tostring), (.restoreDnd | tostring)] | @tsv
+    else empty
+    end
+  ' "$STATE" 2>/dev/null); then
+    IFS=$'\t' read -r managed restore <<<"$parsed"
+  fi
+fi
+
+write_state() {
+  local next_managed=$1 next_restore=$2 tmp
+  tmp=$(mktemp "$(dirname -- "$STATE")/.notifications.XXXXXX")
+  jq -n --argjson managed "$next_managed" --argjson restore "$next_restore" \
+    '{version: 1, managed: $managed, restoreDnd: $restore}' >"$tmp"
+  mv -- "$tmp" "$STATE"
+}
+
+current=$($OMARCHY_SHELL notifications isDnd)
+[[ $current == on || $current == off ]]
+
+if [[ $ACTION == enter ]]; then
+  if [[ $managed != true ]]; then
+    [[ $current == on ]] && restore=true || restore=false
+    write_state true "$restore"
+  fi
+  "$OMARCHY_SHELL" notifications setDnd on >/dev/null
+  [[ $($OMARCHY_SHELL notifications isDnd) == on ]]
+  jq -nc --argjson restore "$restore" \
+    '{applied: true, restoreDnd: $restore}'
+else
+  if [[ $managed == true ]]; then
+    target=off
+    [[ $restore == true ]] && target=on
+    "$OMARCHY_SHELL" notifications setDnd "$target" >/dev/null
+    [[ $($OMARCHY_SHELL notifications isDnd) == "$target" ]]
+  fi
+  write_state false false
+  jq -nc '{applied: false, restoreDnd: false}'
+fi

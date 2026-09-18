@@ -1,16 +1,15 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "ServiceBridge.js" as ServiceBridge
 
 // A separate, third-party-style control placed in the right bar section by
 // Service.qml. The stock-looking left button remains dedicated to the menu.
 BarWidget {
   id: root
-  moduleName: "io.github.elgevan.kids-menu.manager"
+  moduleName: "io.github.elgevan.kids-menu"
 
-  readonly property var allowlistService: bar && bar.shell
-    ? bar.shell.serviceFor("io.github.elgevan.kids-menu")
-    : null
+  property var allowlistService: null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property string modePhase: allowlistService
     ? String(allowlistService.modePhase || "inactive")
@@ -30,6 +29,15 @@ BarWidget {
     target.service = root.allowlistService
   }
 
+  function resolveService() {
+    var next = ServiceBridge.current()
+    if (!next && root.bar && root.bar.shell
+        && typeof root.bar.shell.serviceFor === "function")
+      next = root.bar.shell.serviceFor("io.github.elgevan.kids-menu")
+    if (root.allowlistService !== next) root.allowlistService = next
+    serviceLookup.running = !next
+  }
+
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function togglePanel() { if (panelLoader.item) panelLoader.item.toggle() }
@@ -38,9 +46,19 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  onBarChanged: injectPanel()
+  onBarChanged: {
+    root.resolveService()
+    root.injectPanel()
+  }
   onSettingsChanged: injectPanel()
   onAllowlistServiceChanged: injectPanel()
+
+  Timer {
+    id: serviceLookup
+    interval: 100
+    repeat: true
+    onTriggered: root.resolveService()
+  }
 
   Loader {
     id: panelLoader
@@ -72,4 +90,6 @@ BarWidget {
     active: root.opened || root.modePhase === "active"
     onPressed: root.togglePanel()
   }
+
+  Component.onCompleted: resolveService()
 }

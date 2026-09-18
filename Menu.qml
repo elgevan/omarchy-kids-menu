@@ -2,6 +2,7 @@ import Quickshell
 import QtQuick
 import "Allowlist.js" as Allowlist
 import "KidsBrowser.js" as KidsBrowser
+import "ServiceBridge.js" as ServiceBridge
 
 // Reuse the menu implementation shipped by the running Omarchy installation,
 // but point it at this plugin's allowlisted data. This keeps the plugin aligned
@@ -15,10 +16,10 @@ Loader {
   property string pendingPayload: ""
   property bool hasPendingPayload: false
 
-  readonly property var sourceAppLibrary: shell ? shell.appLibrary : null
-  readonly property var allowlistService: shell && typeof shell.serviceFor === "function"
-    ? shell.serviceFor("io.github.elgevan.kids-menu")
-    : null
+  readonly property var sourceAppLibrary: root.allowlistService
+    ? root.allowlistService.appLibrary
+    : (shell ? shell.appLibrary : null)
+  property var allowlistService: null
   readonly property bool kidsModeEnabled: root.allowlistService
     ? root.allowlistService.kidsModeEnabled === true
     : false
@@ -26,10 +27,28 @@ Loader {
     ? root.allowlistService.modePhase === "active"
     : false
 
-  readonly property string pluginRoot: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir)
-    : ""
+  readonly property string pluginRoot: {
+    var url = String(Qt.resolvedUrl("."))
+    return url.indexOf("file://") === 0
+      ? decodeURIComponent(url.slice(7)).replace(/\/$/, "")
+      : url.replace(/\/$/, "")
+  }
   readonly property string homeDir: Quickshell.env("HOME")
+
+  function resolveService() {
+    var next = ServiceBridge.current()
+    if (!next && root.shell && typeof root.shell.serviceFor === "function")
+      next = root.shell.serviceFor("io.github.elgevan.kids-menu")
+    if (root.allowlistService !== next) root.allowlistService = next
+    serviceLookup.running = !next
+  }
+
+  Timer {
+    id: serviceLookup
+    interval: 100
+    repeat: true
+    onTriggered: root.resolveService()
+  }
 
   asynchronous: false
   source: omarchyPath
@@ -216,6 +235,11 @@ Loader {
 
   onLoaded: configureMenu()
   onOmarchyPathChanged: configureMenu()
-  onShellChanged: configureMenu()
+  onShellChanged: {
+    root.resolveService()
+    root.configureMenu()
+  }
+  onAllowlistServiceChanged: configureMenu()
   onManifestChanged: configureMenu()
+  Component.onCompleted: resolveService()
 }

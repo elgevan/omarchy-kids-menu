@@ -8,6 +8,7 @@ import "ModeState.js" as ModeState
 import "NotificationState.js" as NotificationState
 import "Preferences.js" as Preferences
 import "ShellIntegration.js" as ShellIntegration
+import "ServiceBridge.js" as ServiceBridge
 import "WindowAdmission.js" as WindowAdmission
 
 // Shared state for the menu and its bar-panel editor. The service reads
@@ -51,6 +52,7 @@ Item {
   property bool notificationRestoreDnd: false
   property bool notificationApplied: false
   property bool notificationPolicySynced: false
+  property bool notificationPolicyBusy: false
   property int notificationSetupAttempts: 0
   property int hiddenWindowCount: 0
   property string windowSessionError: ""
@@ -67,6 +69,10 @@ Item {
   property bool shellModeApplied: false
   property bool shellPolicySynced: false
   property bool shellConfigWriteInProgress: false
+  property bool shellConfigLoaded: false
+  property var shellConfigSnapshot: null
+  property bool pluginCatalogLoaded: false
+  property var installedPlugins: ({})
   property int shellSetupAttempts: 0
   property bool shortcutPolicyApplied: false
   property bool shortcutPolicySynced: false
@@ -83,19 +89,18 @@ Item {
   readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || homeDir + "/.local/state"
   readonly property string stateDir: stateRoot + "/omarchy-kids"
   readonly property string notificationStatePath: stateDir + "/notifications.json"
+  readonly property string shellRestoreStatePath: stateDir + "/shell.json"
   readonly property string windowStatePath: stateDir + "/windows.json"
   readonly property string runtimeRoot: Quickshell.env("XDG_RUNTIME_DIR") || stateRoot
   readonly property string runtimeToolDir: runtimeRoot + "/omarchy-kids/tools"
+  readonly property string shellConfigPath: homeDir + "/.config/omarchy/shell.json"
+  readonly property string pluginManifestPath: root.localPath(Qt.resolvedUrl("manifest.json"))
+  // Keep application discovery independent of Omarchy's replaceable scoped
+  // shell facade. DesktopEntries is Quickshell's public read-only catalog; all
+  // launches still pass through this service's admission checks below.
+  readonly property var appLibrary: localAppLibrary
   readonly property var defaultDesktopIds: Allowlist.defaultIds()
-  readonly property var notificationService: root.shell && typeof root.shell.serviceFor === "function"
-    ? root.shell.serviceFor("omarchy.notifications")
-    : null
-  readonly property var lockService: root.shell && typeof root.shell.serviceFor === "function"
-    ? root.shell.serviceFor("omarchy.lock")
-    : null
   readonly property bool notificationsMuted: root.notificationApplied
-    && root.notificationService
-    && root.notificationService.doNotDisturb === true
   readonly property bool allowlistEditable: root.modeStateLoaded && !root.kidsModeEnabled
   readonly property bool settingsEditable: root.modeStateLoaded
     && root.preferencesLoaded && !root.kidsModeEnabled
@@ -103,22 +108,13 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id)
     : "io.github.elgevan.kids-menu"
-  readonly property string managerWidgetId: pluginId + ".manager"
-  readonly property string managerWidgetPath: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/ManagerWidget.qml"
-    : ""
-  readonly property string sourceWindowSessionTool: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/window-session"
-    : ""
-  readonly property string sourceShortcutPolicyTool: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/shortcut-policy"
-    : ""
-  readonly property string sourceLifecycleCleanupTool: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/lifecycle-cleanup"
-    : ""
-  readonly property string sourceBrowserProtectionTool: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/browser-protection"
-    : ""
+  readonly property string menuWidgetId: pluginId + ".menu"
+  readonly property string menuWidgetPath: root.localPath(Qt.resolvedUrl("BarWidget.qml"))
+  readonly property string sourceWindowSessionTool: root.localPath(Qt.resolvedUrl("window-session"))
+  readonly property string sourceShortcutPolicyTool: root.localPath(Qt.resolvedUrl("shortcut-policy"))
+  readonly property string sourceLifecycleCleanupTool: root.localPath(Qt.resolvedUrl("lifecycle-cleanup"))
+  readonly property string sourceBrowserProtectionTool: root.localPath(Qt.resolvedUrl("browser-protection"))
+  readonly property string sourceNotificationPolicyTool: root.localPath(Qt.resolvedUrl("notification-policy"))
   readonly property string windowSessionTool: runtimeToolsReady
     ? runtimeToolDir + "/window-session"
     : ""
@@ -131,6 +127,9 @@ Item {
   readonly property string browserProtectionTool: runtimeToolsReady
     ? runtimeToolDir + "/browser-protection"
     : ""
+  readonly property string notificationPolicyTool: runtimeToolsReady
+    ? runtimeToolDir + "/notification-policy"
+    : ""
   readonly property string browserProfileDir: KidsBrowser.profileDir(homeDir)
   readonly property string browserPolicyDir: KidsBrowser.policyDir()
   readonly property int browserProtectionTimeoutMs: 12000
@@ -138,10 +137,92 @@ Item {
   signal allowlistChanged()
   signal kidsModeChanged()
 
+  QtObject {
+    id: localAppLibrary
+
+    signal appsChanged()
+
+    function entryName(entry) {
+      return String((entry && entry.name) || (entry && entry.id) || "")
+    }
+
+    function entrySubtext(entry) {
+      return String((entry && entry.genericName) || "")
+    }
+
+    function searchText(entry) {
+      var keywords = ""
+      try {
+        if (entry && entry.keywords && typeof entry.keywords.join === "function")
+          keywords = entry.keywords.join(" ")
+      } catch (error) {}
+      return [entry && entry.name, entry && entry.genericName,
+        entry && entry.comment, keywords, entry && entry.id]
+        .join(" ").toLowerCase()
+    }
+
+    function sortedEntries(query) {
+      var values = DesktopEntries.applications.values || []
+      var terms = String(query || "").toLowerCase().trim().split(/\s+/)
+      var rows = []
+      for (var i = 0; i < values.length; i++) {
+        var entry = values[i]
+        if (!entry || entry.noDisplay || !String(entry.id || "")) continue
+        var haystack = searchText(entry)
+        var matches = true
+        for (var term = 0; term < terms.length; term++) {
+          if (terms[term] && haystack.indexOf(terms[term]) < 0) {
+            matches = false
+            break
+          }
+        }
+        if (matches) rows.push({
+          entry: entry,
+          key: entryName(entry).toLowerCase()
+        })
+      }
+      rows.sort(function(left, right) {
+        return left.key < right.key ? -1 : left.key > right.key ? 1 : 0
+      })
+      return rows
+    }
+
+    function iconSource(icon) {
+      var value = String(icon || "")
+      if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0)
+        return value
+      if (value.charAt(0) === "/") return "file://" + value
+      var found = Quickshell.iconPath(value || "application-x-executable", true)
+      return found || Quickshell.iconPath("application-x-executable", true)
+    }
+
+    function refreshIcons() {}
+
+    function launch(desktopId, name) {
+      var id = String(desktopId || "")
+      if (!id) return
+      Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", id + ".desktop"])
+    }
+
+    function remove(desktopId, name) {}
+  }
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() { localAppLibrary.appsChanged() }
+  }
+
+  function localPath(url) {
+    var value = String(url || "")
+    return value.indexOf("file://") === 0
+      ? decodeURIComponent(value.slice(7))
+      : value
+  }
+
   function prepareRuntimeTools() {
     if (!root.directoryReady || !root.sourceWindowSessionTool
         || !root.sourceShortcutPolicyTool || !root.sourceLifecycleCleanupTool
-        || !root.sourceBrowserProtectionTool
+        || !root.sourceBrowserProtectionTool || !root.sourceNotificationPolicyTool
         || stageRuntimeTools.running)
       return
 
@@ -153,6 +234,7 @@ Item {
       root.sourceShortcutPolicyTool,
       root.sourceLifecycleCleanupTool,
       root.sourceBrowserProtectionTool,
+      root.sourceNotificationPolicyTool,
       root.runtimeToolDir
     ]
     stageRuntimeTools.running = true
@@ -267,12 +349,8 @@ Item {
   }
 
   function refreshExemptPluginOptions() {
-    var installedPlugins = root.pluginRegistry
-      ? root.pluginRegistry.installedPlugins
-      : null
     root.exemptPluginOptions = ShellIntegration.exemptablePluginOptions(
-      installedPlugins, root.pluginId,
-      root.shell ? root.shell.shellConfig : null)
+      root.installedPlugins, root.pluginId, root.shellConfigSnapshot)
   }
 
   function effectiveExemptPluginIds() {
@@ -313,6 +391,67 @@ Item {
 
   function togglePluginExempt(pluginId) {
     return root.setPluginExempt(pluginId, !root.isPluginExempt(pluginId))
+  }
+
+  function loadShellConfig(rawText) {
+    var parsed = null
+    try { parsed = JSON.parse(String(rawText || "")) } catch (error) {}
+    if (!parsed || typeof parsed !== "object" || parsed.version !== 1) {
+      root.shellConfigLoaded = false
+      root.shellConfigSnapshot = null
+      return
+    }
+    root.shellConfigSnapshot = parsed
+    root.shellConfigLoaded = true
+    root.refreshExemptPluginOptions()
+    if (!root.shellConfigWriteInProgress) {
+      root.scheduleShellIntegration()
+      root.scheduleShellPolicyVerification()
+    }
+  }
+
+  function persistShellConfig(config) {
+    root.shellConfigSnapshot = JSON.parse(JSON.stringify(config))
+    shellConfigFile.setText(JSON.stringify(root.shellConfigSnapshot, null, 2) + "\n")
+  }
+
+  function persistShellRestoreState() {
+    shellRestoreStateFile.setText(JSON.stringify({
+      version: 1,
+      stockMenuRestore: root.stockMenuRestore,
+      barLayoutRestore: root.barLayoutRestore
+    }, null, 2) + "\n")
+  }
+
+  function refreshPluginCatalog() {
+    if (!pluginCatalog.running) pluginCatalog.running = true
+  }
+
+  function finishPluginCatalog(exitCode, rawText) {
+    var rows = null
+    try { rows = JSON.parse(String(rawText || "")) } catch (error) {}
+    if (exitCode !== 0 || !Array.isArray(rows)) {
+      root.pluginCatalogLoaded = false
+      return
+    }
+
+    var plugins = ({})
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i]
+      var id = row ? String(row.id || "") : ""
+      if (!id) continue
+      plugins[id] = {
+        id: id,
+        name: String(row.name || id),
+        kinds: Array.isArray(row.kinds) ? row.kinds.slice() : [],
+        __isFirstParty: row.firstParty === true
+      }
+    }
+    root.installedPlugins = plugins
+    root.pluginCatalogLoaded = true
+    root.refreshExemptPluginOptions()
+    root.scheduleShellIntegration()
+    root.scheduleShellPolicyVerification()
   }
 
   function loadModeState(rawText) {
@@ -610,10 +749,7 @@ Item {
   }
 
   function forceSafetyLock() {
-    var lock = root.lockService
-    if (!lock || typeof lock.beginLock !== "function" || lock.locked === true) return
-    if (!lock.beginLock())
-      console.warn("omarchy-kids: could not lock after a protection failure")
+    Quickshell.execDetached(["omarchy-shell", "lock", "lock"])
   }
 
   function failActiveMode(message) {
@@ -688,25 +824,7 @@ Item {
   }
 
   function applyNotificationPolicy() {
-    var notifications = root.notificationService
-    if (!root.modeEffectsDesired || !root.directoryReady || !root.notificationStateLoaded || !notifications
-        || notifications.settingsLoaded !== true)
-      return false
-
-    if (!root.notificationStateManaged) {
-      root.notificationRestoreDnd = notifications.doNotDisturb === true
-      root.notificationStateManaged = true
-      // Persist the restore point before changing the global DND state.
-      notificationStateFile.setText(NotificationState.stateText(
-        true, root.notificationRestoreDnd))
-    }
-
-    notifications.setDoNotDisturb(true)
-    root.notificationApplied = true
-    if (notifications.doNotDisturb !== true) return false
-    root.notificationPolicySynced = true
-    root.advanceActivation()
-    return true
+    return root.runNotificationPolicy("enter")
   }
 
   function scheduleNotificationSetup() {
@@ -716,27 +834,52 @@ Item {
   }
 
   function releaseNotificationPolicy() {
-    if (!root.notificationStateLoaded || !root.notificationStateManaged) {
-      root.notificationApplied = false
-      root.notificationPolicySynced = true
-      root.maybeCompleteDeactivation()
-      return true
-    }
-    var notifications = root.notificationService
-    if (!notifications || notifications.settingsLoaded !== true) {
-      console.warn("omarchy-kids: could not restore notification state")
+    return root.runNotificationPolicy("exit")
+  }
+
+  function runNotificationPolicy(action) {
+    if (!root.directoryReady || !root.notificationStateLoaded
+        || !root.notificationPolicyTool)
       return false
+    var expected = action === "enter"
+    if (root.notificationPolicySynced && root.notificationApplied === expected)
+      return true
+    if (root.notificationPolicyBusy || notificationPolicyApply.running)
+      return false
+    root.notificationPolicyBusy = true
+    notificationPolicyApply.command = [
+      root.notificationPolicyTool,
+      action,
+      root.notificationStatePath
+    ]
+    notificationPolicyApply.running = true
+    return false
+  }
+
+  function finishNotificationPolicy(action, exitCode, output) {
+    root.notificationPolicyBusy = false
+    var result = root.parseWindowSessionOutput(output)
+    var expected = action === "enter"
+    if (exitCode !== 0 || !result || result.applied !== expected) {
+      console.warn("omarchy-kids: notification policy " + action
+        + " failed with exit code " + exitCode + ": "
+        + String(output || "").trim())
+      if (action === "enter" && root.modePhase === "entering")
+        root.rollbackActivation("Could not mute notifications")
+      else if (action === "enter")
+        root.failActiveMode("Could not maintain muted notifications")
+      else
+        root.failDeactivation("Could not restore notification settings")
+      return
     }
 
-    notifications.setDoNotDisturb(root.notificationRestoreDnd)
-    if (notifications.doNotDisturb !== root.notificationRestoreDnd) return false
-
-    notificationStateFile.setText(NotificationState.stateText(false, false))
-    root.notificationStateManaged = false
-    root.notificationApplied = false
+    root.notificationStateManaged = expected
+    root.notificationRestoreDnd = result.restoreDnd === true
+    root.notificationApplied = expected
     root.notificationPolicySynced = true
-    root.maybeCompleteDeactivation()
-    return true
+    notificationSetup.stop()
+    if (expected) root.advanceActivation()
+    else root.maybeCompleteDeactivation()
   }
 
   function syncModeEffects() {
@@ -1194,28 +1337,13 @@ Item {
     shellIntegrationSetup.restart()
   }
 
-  function refreshLiveBar() {
-    var liveBar = root.shell && root.shell.bar
-    if (!liveBar) return
-
-    // persistShellConfig updates shell.json and shell.barConfig immediately,
-    // but an already-mounted bar can miss that change while plugin registry
-    // updates are happening in the same turn. Push the new object into the
-    // live bar explicitly so Kids Menu never leaves stale widgets on screen.
-    if ("barConfig" in liveBar) liveBar.barConfig = root.shell.barConfig
-    if (typeof liveBar.applyBarConfig === "function") liveBar.applyBarConfig()
-  }
-
   function kidsShellPolicyMatches() {
-    if (!root.shell || !root.shell.shellConfig) return false
-    var installedPlugins = root.pluginRegistry
-      ? root.pluginRegistry.installedPlugins
-      : null
+    if (!root.shellConfigLoaded || !root.shellConfigSnapshot) return false
     return ShellIntegration.kidsPluginPolicyMatches(
-      root.shell.shellConfig,
-      installedPlugins,
+      root.shellConfigSnapshot,
+      root.installedPlugins,
       root.pluginId,
-      root.managerWidgetId,
+      root.menuWidgetId,
       root.effectiveExemptPluginIds()
     )
   }
@@ -1240,45 +1368,45 @@ Item {
   }
 
   function syncShellIntegration() {
-    if (!root.modeStateLoaded || root.modeStateRecoveryPending || !root.shell
-        || typeof root.shell.mutateShellConfig !== "function"
-        || !root.managerWidgetPath || !root.pluginId)
+    if (!root.modeStateLoaded || root.modeStateRecoveryPending
+        || !root.shellConfigLoaded || !root.shellConfigSnapshot
+        || (root.modeEffectsDesired && !root.pluginCatalogLoaded)
+        || !root.menuWidgetPath || !root.pluginId)
       return false
 
     try {
       // Close every currently open plugin surface that is not part of the
       // Kids Menu allowlist before disabling it in shell.json.
-      var installedPlugins = root.pluginRegistry
-        ? root.pluginRegistry.installedPlugins
-        : null
-      if (root.modeEffectsDesired && typeof root.shell.hide === "function") {
+      if (root.modeEffectsDesired) {
         var hiddenPluginIds = ShellIntegration.hiddenPluginIds(
-          installedPlugins, root.pluginId, root.effectiveExemptPluginIds())
+          root.installedPlugins, root.pluginId, root.effectiveExemptPluginIds())
         for (var i = 0; i < hiddenPluginIds.length; i++)
-          root.shell.hide(hiddenPluginIds[i])
+          Quickshell.execDetached([
+            "omarchy-shell", "shell", "hide", hiddenPluginIds[i]
+          ])
       }
 
       root.shellConfigWriteInProgress = true
       try {
-        root.shell.mutateShellConfig(function(config) {
-          var result = ShellIntegration.activate(
-            config,
-            root.pluginId,
-            root.managerWidgetId,
-            root.managerWidgetPath,
-            root.modeEffectsDesired,
-            installedPlugins,
-            root.effectiveExemptPluginIds()
-          )
-          if (result && result.restore) root.stockMenuRestore = result.restore
-          root.barLayoutRestore = result && result.barRestore
-            ? result.barRestore
-            : null
-        })
+        var config = JSON.parse(JSON.stringify(root.shellConfigSnapshot))
+        var result = ShellIntegration.activate(
+          config,
+          root.pluginId,
+          root.menuWidgetId,
+          root.menuWidgetPath,
+          root.modeEffectsDesired,
+          root.installedPlugins,
+          root.effectiveExemptPluginIds()
+        )
+        if (result && result.restore) root.stockMenuRestore = result.restore
+        root.barLayoutRestore = result && result.barRestore
+          ? result.barRestore
+          : null
+        root.persistShellRestoreState()
+        root.persistShellConfig(config)
       } finally {
         root.shellConfigWriteInProgress = false
       }
-      root.refreshLiveBar()
 
       if (root.modeEffectsDesired && !root.kidsShellPolicyMatches())
         return false
@@ -1296,18 +1424,18 @@ Item {
   }
 
   function releaseShellIntegration() {
-    if (!root.shell || typeof root.shell.mutateShellConfig !== "function") return
-    root.shell.mutateShellConfig(function(config) {
-      ShellIntegration.deactivate(
-        config,
-        root.pluginId,
-        root.managerWidgetId,
-        root.stockMenuRestore,
-        root.barLayoutRestore
-      )
-    })
-    root.refreshLiveBar()
+    if (!root.shellConfigLoaded || !root.shellConfigSnapshot) return
+    var config = JSON.parse(JSON.stringify(root.shellConfigSnapshot))
+    ShellIntegration.deactivate(
+      config,
+      root.pluginId,
+      root.menuWidgetId,
+      root.stockMenuRestore,
+      root.barLayoutRestore
+    )
+    root.persistShellConfig(config)
     root.barLayoutRestore = null
+    root.persistShellRestoreState()
     root.shellModeApplied = false
     root.shellPolicySynced = true
   }
@@ -1335,6 +1463,17 @@ Item {
   }
 
   FileView {
+    id: shellConfigFile
+    path: root.shellConfigPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadShellConfig(text())
+    onLoadFailed: root.loadShellConfig("")
+    onFileChanged: reload()
+  }
+
+  FileView {
     id: modeStateFile
     path: root.modePath
     watchChanges: true
@@ -1354,6 +1493,13 @@ Item {
     onLoaded: root.loadNotificationState(text())
     onLoadFailed: root.loadNotificationState("")
     onFileChanged: reload()
+  }
+
+  FileView {
+    id: shellRestoreStateFile
+    path: root.shellRestoreStatePath
+    atomicWrites: true
+    printErrors: false
   }
 
   FileView {
@@ -1421,6 +1567,26 @@ Item {
         else if (root.modePhase === "exiting" || root.modePhase === "rollback")
           root.failDeactivation("Could not prepare runtime helpers")
       }
+    }
+  }
+
+  Process {
+    id: pluginCatalog
+    command: ["omarchy", "plugin", "list", "--json"]
+    stdout: StdioCollector { id: pluginCatalogOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishPluginCatalog(exitCode, pluginCatalogOutput.text)
+    }
+  }
+
+  Process {
+    id: notificationPolicyApply
+    command: []
+    stdout: StdioCollector { id: notificationPolicyOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      var action = notificationPolicyApply.command.length > 1
+        ? String(notificationPolicyApply.command[1]) : ""
+      root.finishNotificationPolicy(action, exitCode, notificationPolicyOutput.text)
     }
   }
 
@@ -1595,42 +1761,25 @@ Item {
   }
 
   onShellChanged: {
-    root.refreshExemptPluginOptions()
     root.scheduleShellIntegration()
-    root.scheduleNotificationSetup()
-  }
-
-  Connections {
-    target: root.shell
-    function onShellConfigChanged() {
-      if (!root.modeEffectsDesired) root.refreshExemptPluginOptions()
-      root.scheduleShellPolicyVerification()
-    }
-  }
-  Connections {
-    target: root.pluginRegistry
-    function onPluginsChanged() {
-      root.refreshExemptPluginOptions()
-      root.scheduleShellPolicyVerification()
-    }
   }
   Connections {
     target: Hyprland
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
   onManifestChanged: {
-    root.refreshExemptPluginOptions()
+    root.refreshPluginCatalog()
     root.scheduleShellIntegration()
     root.prepareRuntimeTools()
   }
-  onNotificationServiceChanged: root.scheduleNotificationSetup()
   onNotificationsMutedChanged: {
     if (root.modeEffectsDesired && !root.notificationsMuted)
       root.scheduleNotificationSetup()
   }
 
   Component.onCompleted: {
-    root.refreshExemptPluginOptions()
+    ServiceBridge.publish(root)
+    root.refreshPluginCatalog()
     ensureDirectory.running = true
     root.scheduleShellIntegration()
     root.scheduleNotificationSetup()
@@ -1639,35 +1788,20 @@ Item {
   }
 
   Component.onDestruction: {
-    if (root.pluginRegistry && !root.pluginRegistry.isEnabled(root.pluginId)) {
-      var notificationCleanupDetached = false
-      if (root.lifecycleCleanupTool && root.windowSessionTool && root.shortcutPolicyTool) {
-        Quickshell.execDetached([
-          root.lifecycleCleanupTool,
-          root.windowSessionTool,
-          root.shortcutPolicyTool,
-          root.notificationStatePath,
-          root.omarchyPath
-        ])
-        notificationCleanupDetached = true
-      } else {
-        if (root.windowSessionTool)
-          Quickshell.execDetached([root.windowSessionTool, "exit"])
-        if (root.shortcutPolicyTool)
-          Quickshell.execDetached([root.shortcutPolicyTool, "exit"])
-      }
-      if (!notificationCleanupDetached) {
-        try {
-          root.releaseNotificationPolicy()
-        } catch (error) {
-          console.warn("omarchy-kids: could not restore notifications during removal: " + error)
-        }
-      }
-      try {
-        root.releaseShellIntegration()
-      } catch (error) {
-        console.warn("omarchy-kids: could not restore shell integration during removal: " + error)
-      }
+    ServiceBridge.clear(root)
+    if (root.lifecycleCleanupTool && root.windowSessionTool && root.shortcutPolicyTool) {
+      Quickshell.execDetached([
+        root.lifecycleCleanupTool,
+        root.windowSessionTool,
+        root.shortcutPolicyTool,
+        root.notificationStatePath,
+        root.omarchyPath,
+        root.shellRestoreStatePath,
+        root.shellConfigPath,
+        root.pluginId,
+        root.menuWidgetId,
+        root.pluginManifestPath
+      ])
     }
   }
 }

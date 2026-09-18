@@ -1,20 +1,37 @@
 import QtQuick
+import Quickshell
+import Quickshell.Io
 import qs.Ui
 import "BarActions.js" as BarActions
 
-// Preserve the normal Omarchy menu symbol while using this plugin's own
-// permanent ID. Service.qml moves this widget into the stock menu's bar slot.
+// Preserve the normal Omarchy menu symbol in the stock menu's bar slot. This
+// is an intentionally service-less inline entry under Omarchy 4.0.4's scoped
+// plugin APIs, so it reads only this plugin's durable mode flag.
 BarWidget {
   id: root
-  moduleName: "io.github.elgevan.kids-menu"
+  moduleName: "io.github.elgevan.kids-menu.menu"
 
-  readonly property var allowlistService: root.bar && root.bar.shell
-    && typeof root.bar.shell.serviceFor === "function"
-    ? root.bar.shell.serviceFor("io.github.elgevan.kids-menu")
-    : null
-  readonly property bool kidsModeEnabled: root.allowlistService
-    ? root.allowlistService.kidsModeEnabled === true
-    : false
+  property bool kidsModeEnabled: false
+  readonly property string modePath: Quickshell.env("HOME")
+    + "/.config/omarchy-kids/mode.json"
+
+  function loadMode(rawText) {
+    try {
+      var value = JSON.parse(String(rawText || ""))
+      root.kidsModeEnabled = value && value.version === 1 && value.enabled === true
+    } catch (error) {
+      root.kidsModeEnabled = false
+    }
+  }
+
+  FileView {
+    path: root.modePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadMode(text())
+    onLoadFailed: root.kidsModeEnabled = false
+    onFileChanged: reload()
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

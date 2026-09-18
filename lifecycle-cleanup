@@ -7,6 +7,11 @@ WINDOW_SESSION=${1:?window-session path is required}
 SHORTCUT_POLICY=${2:?shortcut-policy path is required}
 NOTIFICATION_STATE=${3:-}
 OMARCHY_PATH=${4:-${OMARCHY_PATH:-/usr/share/omarchy}}
+SHELL_STATE=${5:-}
+SHELL_CONFIG=${6:-}
+PLUGIN_ID=${7:-}
+MANAGER_ID=${8:-}
+PLUGIN_MANIFEST=${9:-}
 OMARCHY_SHELL=${OMARCHY_KIDS_OMARCHY_SHELL:-omarchy-shell}
 SETTLE_SECONDS=${OMARCHY_KIDS_CLEANUP_SETTLE_SECONDS:-2}
 RETRY_SECONDS=${OMARCHY_KIDS_CLEANUP_RETRY_SECONDS:-1}
@@ -37,17 +42,81 @@ restore_notifications() {
   mv -- "$state_tmp" "$NOTIFICATION_STATE"
 }
 
+restore_shell() {
+  local config_tmp
+  [[ -n $SHELL_STATE && -f $SHELL_STATE && -n $SHELL_CONFIG \
+    && -f $SHELL_CONFIG && -n $PLUGIN_ID && -n $MANAGER_ID ]] || return 0
+
+  config_tmp=$(mktemp "$(dirname -- "$SHELL_CONFIG")/.shell.XXXXXX")
+  if ! jq --slurpfile state "$SHELL_STATE" \
+      --arg plugin "$PLUGIN_ID" --arg manager "$MANAGER_ID" '
+    def entry_id: if type == "object" then (.id // "") else . end;
+    def without($id): map(select(entry_id != $id));
+    def insert_at($index; $entry):
+      . as $array
+      |
+      ($index | tonumber? // 0 | floor | if . < 0 then 0 else . end) as $wanted
+      | ($array | length) as $length
+      | (if $wanted > $length then $length else $wanted end) as $at
+      | $array[0:$at] + [$entry] + $array[$at:];
+    def shape:
+      .bar = (if (.bar | type) == "object" then .bar else {} end)
+      | .bar.layout = (if (.bar.layout | type) == "object" then .bar.layout else {} end)
+      | .bar.layout.left = (if (.bar.layout.left | type) == "array" then .bar.layout.left else [] end)
+      | .bar.layout.center = (if (.bar.layout.center | type) == "array" then .bar.layout.center else [] end)
+      | .bar.layout.right = (if (.bar.layout.right | type) == "array" then .bar.layout.right else [] end)
+      | .plugins = (if (.plugins | type) == "array" then .plugins else [] end);
+    shape
+    | ($state[0] // {}) as $saved
+    | (if ($saved.barLayoutRestore | type) == "object" then
+        .bar.layout.left = ($saved.barLayoutRestore.left // [])
+        | .bar.layout.center = ($saved.barLayoutRestore.center // [])
+        | .bar.layout.right = ($saved.barLayoutRestore.right // [])
+        | .plugins = ($saved.barLayoutRestore.plugins // [])
+        | if $saved.barLayoutRestore.disabledPlugins == null
+          then del(.disabledPlugins)
+          else .disabledPlugins = $saved.barLayoutRestore.disabledPlugins
+          end
+      else . end)
+    | .bar.layout.left |= (without($plugin) | without($manager) | without("omarchy.menu"))
+    | .bar.layout.center |= (without($plugin) | without($manager) | without("omarchy.menu"))
+    | .bar.layout.right |= (without($plugin) | without($manager) | without("omarchy.menu"))
+    | .plugins |= (without($plugin) | without($manager))
+    | if (($saved.stockMenuRestore | type) == "object")
+        and (["left", "center", "right"] | index($saved.stockMenuRestore.section)) != null
+        and (($saved.stockMenuRestore.entry | type) == "object")
+      then .bar.layout[$saved.stockMenuRestore.section] |=
+        insert_at($saved.stockMenuRestore.index; $saved.stockMenuRestore.entry)
+      else . end
+  ' "$SHELL_CONFIG" >"$config_tmp"; then
+    rm -f -- "$config_tmp"
+    return 1
+  fi
+  chmod --reference="$SHELL_CONFIG" "$config_tmp" 2>/dev/null || chmod 0600 "$config_tmp"
+  mv -- "$config_tmp" "$SHELL_CONFIG"
+  "$OMARCHY_SHELL" shell reloadConfig >/dev/null
+}
+
 # Component destruction cannot await a Process. Give any execDetached launch a
 # short mapping window, then retry window/workspace cleanup while a late-mapping
 # client or close confirmation settles. If cleanup never succeeds, release the
 # shortcut layer anyway: the plugin UI no longer exists after removal, so
 # retaining its submap would leave the user without an in-session recovery path.
 sleep "$SETTLE_SECONDS"
+
+# A shell restart destroys QML services too. Only clean up when the plugin's
+# manifest has actually disappeared; otherwise the next service instance must
+# recover the active Kids session from its durable state.
+if [[ -n $PLUGIN_MANIFEST && -f $PLUGIN_MANIFEST ]]; then
+  exit 0
+fi
+
 attempt=0
 while ((attempt < MAX_ATTEMPTS)); do
   attempt=$((attempt + 1))
   if "$WINDOW_SESSION" exit >/dev/null; then
-    if shortcut_result=$("$SHORTCUT_POLICY" exit) && restore_notifications; then
+    if shortcut_result=$("$SHORTCUT_POLICY" exit) \
+        && restore_notifications && restore_shell; then
       printf '%s\n' "$shortcut_result"
       exit 0
     fi
@@ -59,7 +128,7 @@ done
 
 # Keep the failed window snapshot for a later recovery attempt, but do not leave
 # plugin-owned shortcut restrictions active after the plugin itself is gone.
-if "$SHORTCUT_POLICY" exit >/dev/null && restore_notifications; then
+if "$SHORTCUT_POLICY" exit >/dev/null && restore_notifications && restore_shell; then
   printf 'Kids Menu removal could not restore every window; shortcut restrictions were released and notification state was restored.\n' >&2
 else
   printf 'Kids Menu removal could not restore every desktop control; see saved recovery state for details.\n' >&2
