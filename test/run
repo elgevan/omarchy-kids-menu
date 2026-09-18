@@ -48,7 +48,8 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.elgevan.kids-menu" and
   .name == "Kids Menu" and
-  .version == "0.22.0" and
+  (.version | type == "string" and
+    test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$")) and
   .author == "elgevan" and
   .description == "Supervised kids mode for shared computers, with chosen apps and family-filtered web browsing." and
   .kinds == ["menu", "bar-widget", "service"] and

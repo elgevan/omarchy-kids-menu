@@ -9,11 +9,14 @@ protection.
 
 ## Install
 
-Requires Omarchy 4 with the Quattro shell, Chromium, Bubblewrap, and the
-standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The plugin
-is cloned by the install command below. After installation, it does not install
-packages or fetch additional code at runtime, and it requires no elevated
-privileges.
+Requires Omarchy 4.0.4 or newer with the Quattro shell, Chromium, Bubblewrap,
+and the standard `hyprctl`, `jq`, `flock`, Coreutils, and `uwsm-app` tools. The
+plugin is cloned by the install command below. After installation, it does not
+install packages or fetch additional code at runtime, and it requires no
+elevated privileges.
+
+- Minimum supported Omarchy: 4.0.4
+- Latest tested Omarchy: 4.0.4-1
 
 ```bash
 omarchy plugin add https://github.com/elgevan/omarchy-kids-menu.git --enable

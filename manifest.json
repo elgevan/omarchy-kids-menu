@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.elgevan.kids-menu",
   "name": "Kids Menu",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "author": "elgevan",
   "license": "MIT",
   "description": "Supervised kids mode for shared computers, with chosen apps and family-filtered web browsing.",
