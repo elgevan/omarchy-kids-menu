@@ -1473,15 +1473,11 @@ Item {
     onFileChanged: reload()
   }
 
-  FileView {
+  ModeFile {
     id: modeStateFile
     path: root.modePath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadModeState(text())
+    onLoaded: function(content) { root.loadModeState(content) }
     onLoadFailed: root.loadModeState("")
-    onFileChanged: reload()
   }
 
   FileView {

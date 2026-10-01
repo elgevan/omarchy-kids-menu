@@ -24,13 +24,10 @@ BarWidget {
     }
   }
 
-  FileView {
+  ModeFile {
     path: root.modePath
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.loadMode(text())
+    onLoaded: function(content) { root.loadMode(content) }
     onLoadFailed: root.kidsModeEnabled = false
-    onFileChanged: reload()
   }
 
   implicitWidth: button.implicitWidth

@@ -17,7 +17,7 @@ bash -n "$PLUGIN_ROOT/test/run" "$PLUGIN_ROOT/test/vm-acceptance" \
   "$PLUGIN_ROOT/test/window-hyprctl-mock" \
   "$PLUGIN_ROOT/test/notification-shell-mock" \
   "$WINDOW_SESSION" "$SHORTCUT_POLICY" "$LIFECYCLE_CLEANUP" \
-  "$BROWSER_PROTECTION" "$NOTIFICATION_POLICY"
+  "$BROWSER_PROTECTION" "$NOTIFICATION_POLICY" "$PLUGIN_ROOT/read-mode-state"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -197,6 +197,8 @@ assert.deepEqual(JSON.parse(state.stateText(true)), {version: 1, enabled: true})
 assert.deepEqual(JSON.parse(state.stateText(false)), {version: 1, enabled: false})
 assert.deepEqual(JSON.parse(state.stateText()), {version: 1, enabled: false})
 NODE
+
+node "$PLUGIN_ROOT/test/mode-file-test.js"
 
 node - "$PLUGIN_ROOT/WindowAdmission.js" <<'NODE'
 const assert = require("node:assert/strict")

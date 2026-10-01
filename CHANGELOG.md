@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Bound mode-state reads before data enters the shell, reject non-regular and
+  oversized files, and preserve atomic writes and change notifications.
+- Cover mode-state recovery, stale reads, repeated writes, and stalled readers.
+
 ## 0.22.1 - 2026-09-18
 
 - Restore compatibility with Omarchy 4.0.4's capability-scoped plugin APIs.

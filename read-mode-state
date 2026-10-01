@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Keep mode.json out of the shell process until its type, size and schema are
+# checked. The deadline also covers replacement with a FIFO between test/open.
+set -Eeuo pipefail
+
+if [[ ${1:-} != --read ]]; then
+  [[ $# == 1 ]] || exit 1
+  exec timeout --kill-after=1s 2s bash "$0" --read "$1"
+fi
+
+[[ $# == 2 ]] || exit 1
+path=$2
+[[ -d $(dirname -- "$path") ]] || exit 3
+[[ -f $path && ! -L $path ]] || exit 1
+exec 3<"$path"
+[[ -f /proc/self/fd/3 ]] || exit 1
+
+# Read one byte beyond the limit so an oversized file cannot become a valid
+# truncated document. Base64 preserves NUL/invalid UTF-8 in Bash, and counting
+# decoded bytes avoids jq's UTF-8 replacement changing the original byte count.
+encoded=$(head -c 4097 <&3 | base64 --wrap=0)
+size=$(printf '%s' "$encoded" | base64 --decode | wc -c)
+(( size <= 4096 )) || exit 1
+printf '%s' "$encoded" | base64 --decode | jq -ecRs '
+  fromjson
+  | select(type == "object" and .version == 1 and (.enabled | type) == "boolean")
+  | {version: 1, enabled: .enabled}
+'
