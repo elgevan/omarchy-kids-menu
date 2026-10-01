@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.22.2 - 2026-10-01
 
 - Bound mode-state reads before data enters the shell, reject non-regular and
   oversized files, and preserve atomic writes and change notifications.
